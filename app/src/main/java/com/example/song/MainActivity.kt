@@ -9,12 +9,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -29,7 +25,6 @@ import com.example.song.ui.components.NowPlayingBar
 import com.example.song.ui.screens.LibraryScreen
 import com.example.song.ui.screens.PlayerScreen
 import com.example.song.ui.screens.PlaylistDetailScreen
-import com.example.song.ui.screens.PlaylistsScreen
 import com.example.song.ui.theme.SongTheme
 import com.example.song.viewmodel.SongViewModel
 
@@ -93,28 +88,12 @@ fun MainApp(viewModel: SongViewModel) {
     Scaffold(
         bottomBar = {
             if (currentDestination?.route != "player") {
-                Column {
-                    NowPlayingBar(
-                        song = currentSong,
-                        isPlaying = isPlaying,
-                        onTogglePlay = { viewModel.togglePlayPause() },
-                        onClick = { navController.navigate("player") }
-                    )
-                    NavigationBar {
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.Home, contentDescription = "Library") },
-                            label = { Text("Library") },
-                            selected = currentDestination?.route == "library",
-                            onClick = { navController.navigate("library") }
-                        )
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.List, contentDescription = "Playlists") },
-                            label = { Text("Playlists") },
-                            selected = currentDestination?.route == "playlists",
-                            onClick = { navController.navigate("playlists") }
-                        )
-                    }
-                }
+                NowPlayingBar(
+                    song = currentSong,
+                    isPlaying = isPlaying,
+                    onTogglePlay = { viewModel.togglePlayPause() },
+                    onClick = { navController.navigate("player") }
+                )
             }
         }
     ) { innerPadding ->
@@ -124,20 +103,11 @@ fun MainApp(viewModel: SongViewModel) {
             modifier = Modifier.padding(if (currentDestination?.route == "player") PaddingValues() else innerPadding)
         ) {
             composable("library") {
-                val songs by viewModel.allSongs.collectAsState()
                 LibraryScreen(
-                    songs = songs,
-                    onPlaySong = { viewModel.playSong(it, songs) },
-                    onAddSong = { viewModel.addSong(it) },
-                    onDeleteSong = { viewModel.deleteSong(it.id) }
-                )
-            }
-            composable("playlists") {
-                val playlists by viewModel.playlists.collectAsState()
-                PlaylistsScreen(
-                    playlists = playlists,
-                    onCreatePlaylist = { viewModel.createPlaylist(it) },
-                    onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") }
+                    viewModel = viewModel,
+                    onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                    onFavoritesClick = { navController.navigate("playlist/-1/Favorites") },
+                    onSongClick = { navController.navigate("player") }
                 )
             }
             composable(
@@ -152,7 +122,9 @@ fun MainApp(viewModel: SongViewModel) {
                 PlaylistDetailScreen(
                     playlistId = playlistId,
                     playlistName = playlistName,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    onBackClick = { navController.popBackStack() },
+                    onSongClick = { navController.navigate("player") }
                 )
             }
             composable("player") {

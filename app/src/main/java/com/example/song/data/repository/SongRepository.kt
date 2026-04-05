@@ -24,12 +24,12 @@ class SongRepository(
 
     val allSongs: Flow<List<Song>> = songDao.getAllSongs()
     val allPlaylists: Flow<List<Playlist>> = playlistDao.getAllPlaylists()
+    val favoriteSongs: Flow<List<Song>> = songDao.getFavoriteSongs()
 
     suspend fun insertSong(song: Song) {
-        // Clean up title for better search results
         val cleanTitle = song.title
-            .substringAfterLast("/") // Remove path
-            .substringBeforeLast(".") // Remove extension (.mp3)
+            .substringAfterLast("/")
+            .substringBeforeLast(".")
             .replace("_", " ")
             .replace("-", " ")
             .trim()
@@ -41,11 +41,14 @@ class SongRepository(
             null
         }
         
-        // Also update the song title to the clean version for better UI
         songDao.insertSong(song.copy(
             title = cleanTitle,
             imageUrl = coverUrl ?: song.imageUrl
         ))
+    }
+
+    suspend fun updateSong(song: Song) {
+        songDao.updateSong(song)
     }
 
     suspend fun deleteSong(songId: Int) {

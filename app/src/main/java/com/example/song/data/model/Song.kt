@@ -10,5 +10,6 @@ data class Song(
     val title: String,
     val artist: String = "Unknown Artist",
     val audioUri: String,
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val isFavorite: Boolean = false
 )

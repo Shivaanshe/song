@@ -36,6 +36,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
 
+    private val _favoriteSongs = MutableStateFlow<List<Song>>(emptyList())
+    val favoriteSongs: StateFlow<List<Song>> = _favoriteSongs.asStateFlow()
+
     private val _currentPlayingSong = MutableStateFlow<Song?>(null)
     val currentPlayingSong: StateFlow<Song?> = _currentPlayingSong.asStateFlow()
 
@@ -60,6 +63,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             repository.allPlaylists.collect { _playlists.value = it }
+        }
+        viewModelScope.launch {
+            repository.favoriteSongs.collect { _favoriteSongs.value = it }
         }
         initMediaController(application)
         startProgressUpdate()
@@ -110,6 +116,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun addSong(song: Song) {
         viewModelScope.launch {
             repository.insertSong(song)
+        }
+    }
+
+    fun updateFavorite(song: Song, isFavorite: Boolean) {
+        viewModelScope.launch {
+            repository.updateSong(song.copy(isFavorite = isFavorite))
         }
     }
 

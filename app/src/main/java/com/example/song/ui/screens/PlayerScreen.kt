@@ -1,30 +1,27 @@
 package com.example.song.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.song.viewmodel.SongViewModel
 import java.util.Locale
@@ -40,45 +37,61 @@ fun PlayerScreen(
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
 
+    // Vibrant background gradient
+    val backgroundGradient = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFFD1C4E9),
+            Color(0xFFBBDEFB)
+        )
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF2E2E2E),
-                        Color(0xFF121212)
-                    )
-                )
-            )
+            .background(backgroundGradient)
     ) {
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        titleContentColor = Color.White,
-                        navigationIconContentColor = Color.White,
-                        actionIconContentColor = Color.White
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent
                     ),
                     title = {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Text(
-                                "PLAYING FROM LIBRARY",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF424242)
+                            )
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onBackClick,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Back",
+                                tint = Color(0xFF424242)
                             )
                         }
                     },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
                     actions = {
-                        IconButton(onClick = { /* More options */ }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
+                        IconButton(
+                            onClick = { /* Options */ },
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "More",
+                                tint = Color(0xFF424242)
+                            )
                         }
                     }
                 )
@@ -91,134 +104,171 @@ fun PlayerScreen(
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.weight(0.2f))
+                Spacer(modifier = Modifier.weight(0.1f))
 
-                // Album Art
-                Card(
+                // Album Art with Smooth Transition
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .padding(8.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    elevation = CardDefaults.cardElevation(12.dp)
+                        .size(300.dp)
+                        .shadow(24.dp, RoundedCornerShape(32.dp))
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.White.copy(alpha = 0.2f))
                 ) {
-                    AsyncImage(
-                        model = song?.imageUrl,
-                        contentDescription = "Song Cover",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    Crossfade(targetState = song?.imageUrl, label = "AlbumArt") { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.weight(0.2f))
+                Spacer(modifier = Modifier.weight(0.1f))
 
                 // Song Info
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = song?.title ?: "No Song Selected",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = song?.artist ?: "Unknown Artist",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.LightGray,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        AnimatedContent(
+                            targetState = song?.title ?: "No Song",
+                            transitionSpec = {
+                                fadeIn() + slideInVertically { it / 2 } togetherWith
+                                        fadeOut() + slideOutVertically { -it / 2 }
+                            },
+                            label = "SongTitle"
+                        ) { title ->
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333),
+                                    fontSize = 24.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        AnimatedContent(
+                            targetState = song?.artist ?: "Unknown Artist",
+                            label = "ArtistName"
+                        ) { artist ->
+                            Text(
+                                text = artist,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    color = Color(0xFF666666),
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = { 
+                        song?.let { viewModel.updateFavorite(it, !it.isFavorite) }
+                    }) {
+                        Icon(
+                            imageVector = if (song?.isFavorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (song?.isFavorite == true) Color(0xFFE91E63) else Color(0xFF424242),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Seek Bar
+                // Seekbar
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Slider(
                         value = currentPosition.toFloat(),
                         onValueChange = { viewModel.seekTo(it.toLong()) },
-                        valueRange = 0f..(if (duration > 0) duration.toFloat() else 1f),
+                        valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                            activeTrackColor = Color(0xFFE91E63),
+                            inactiveTrackColor = Color.White.copy(alpha = 0.5f)
                         )
                     )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = formatTime(currentPosition),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray
+                            formatTime(currentPosition),
+                            color = Color(0xFF555555),
+                            style = MaterialTheme.typography.labelMedium
                         )
                         Text(
-                            text = formatTime(duration),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray
+                            formatTime(duration),
+                            color = Color(0xFF555555),
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
                 // Controls
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    horizontalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     IconButton(
                         onClick = { viewModel.skipToPrevious() },
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Color.White.copy(alpha = 0.4f), CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SkipPrevious,
-                            contentDescription = "Previous",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
+                            Icons.Default.SkipPrevious,
+                            contentDescription = null,
+                            tint = Color(0xFF424242),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    Surface(
+                    Box(
                         modifier = Modifier
-                            .size(72.dp)
-                            .noRippleClickable { viewModel.togglePlayPause() },
-                        shape = RoundedCornerShape(36.dp),
-                        color = Color.White
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = Color.Black,
-                                modifier = Modifier.size(40.dp)
+                            .size(80.dp)
+                            .shadow(8.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(Color(0xFFFF4081), Color(0xFFE040FB))
+                                )
                             )
-                        }
+                            .noRippleClickable { viewModel.togglePlayPause() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp)
+                        )
                     }
 
                     IconButton(
                         onClick = { viewModel.skipToNext() },
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Color.White.copy(alpha = 0.4f), CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
+                            Icons.Default.SkipNext,
+                            contentDescription = null,
+                            tint = Color(0xFF424242),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
-                
-                Spacer(modifier = Modifier.weight(0.4f))
+
+                Spacer(modifier = Modifier.weight(0.1f))
             }
         }
     }

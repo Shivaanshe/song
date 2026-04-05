@@ -4,27 +4,47 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
-import com.example.song.ui.components.SongRow
+import com.example.song.ui.components.SongListItem
+import com.example.song.viewmodel.SongViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    songs: List<Song>,
-    onPlaySong: (Song) -> Unit,
-    onAddSong: (Song) -> Unit,
-    onDeleteSong: (Song) -> Unit
+    viewModel: SongViewModel,
+    onPlaylistClick: (Playlist) -> Unit,
+    onFavoritesClick: () -> Unit,
+    onSongClick: () -> Unit
 ) {
+    val songs by viewModel.allSongs.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val context = LocalContext.current
+
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri: Uri? ->
@@ -43,37 +63,197 @@ fun LibraryScreen(
                     audioUri = it.toString(),
                     artist = "Unknown Artist"
                 )
-                onAddSong(song)
+                viewModel.addSong(song)
             }
         }
     )
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = { launcher.launch(arrayOf("audio/*")) }) {
-                Icon(Icons.Default.Add, contentDescription = "Add Song")
+    val backgroundGradient = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFFD1C4E9),
+            Color(0xFFBBDEFB)
+        )
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundGradient)
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent
+                    ),
+                    title = {
+                        Text(
+                            "My Library",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF333333)
+                            )
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = { /* Search */ },
+                            modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { launcher.launch(arrayOf("audio/*")) },
+                            modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Song", tint = Color(0xFF424242))
+                        }
+                    }
+                )
             }
-        }
-    ) { padding ->
-        if (songs.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No songs added yet. Tap + to add from storage.")
-            }
-        } else {
+        ) { padding ->
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
+                // Collections Section (Playlists)
+                item {
+                    Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                        Text(
+                            "Collections",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF424242)
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(end = 24.dp)
+                        ) {
+                            items(playlists) { playlist ->
+                                PlaylistCard(playlist) { onPlaylistClick(playlist) }
+                            }
+                            // Hardcoded Favorites Card
+                            item {
+                                FavoritesCollectionCard(favoriteSongs.size) {
+                                    onFavoritesClick()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Recommended Section (All Songs)
+                item {
+                    Text(
+                        "Recommended",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF424242)
+                        )
+                    )
+                }
+
                 items(songs) { song ->
-                    SongRow(
+                    SongListItem(
                         song = song,
-                        onClick = { onPlaySong(song) },
-                        onDelete = { onDeleteSong(song) }
+                        onPlayClick = {
+                            viewModel.playSong(song, songs)
+                            onSongClick()
+                        },
+                        onFavoriteToggle = {
+                            viewModel.updateFavorite(song, !song.isFavorite)
+                        },
+                        onDelete = {
+                            viewModel.deleteSong(song.id)
+                        }
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .shadow(8.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.3f))
+        ) {
+            Icon(
+                Icons.Default.MusicNote,
+                contentDescription = null,
+                modifier = Modifier.align(Alignment.Center).size(48.dp),
+                tint = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "Playlist",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray
+        )
+    }
+}
+
+@Composable
+fun FavoritesCollectionCard(count: Int, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .shadow(8.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFFF4081), Color(0xFFE040FB))
+                    )
+                )
+        ) {
+            Icon(
+                Icons.Default.Favorite,
+                contentDescription = null,
+                modifier = Modifier.align(Alignment.Center).size(48.dp),
+                tint = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Favorites",
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            maxLines = 1
+        )
+        Text(
+            text = "$count songs",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray
+        )
     }
 }
