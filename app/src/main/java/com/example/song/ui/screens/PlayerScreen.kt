@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.example.song.viewmodel.SongViewModel
 import java.util.Locale
@@ -36,6 +37,7 @@ fun PlayerScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
 
     // Vibrant background gradient
     val backgroundGradient = Brush.verticalGradient(
@@ -82,15 +84,19 @@ fun PlayerScreen(
                     },
                     actions = {
                         IconButton(
-                            onClick = { /* Options */ },
+                            onClick = { viewModel.toggleRepeatMode() },
                             modifier = Modifier
                                 .padding(8.dp)
                                 .background(Color.White.copy(alpha = 0.3f), CircleShape)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "More",
-                                tint = Color(0xFF424242)
+                                imageVector = when (repeatMode) {
+                                    Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
+                                    Player.REPEAT_MODE_ALL -> Icons.Default.Repeat
+                                    else -> Icons.Default.Repeat
+                                },
+                                contentDescription = "Repeat Mode",
+                                tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFFE91E63)
                             )
                         }
                     }

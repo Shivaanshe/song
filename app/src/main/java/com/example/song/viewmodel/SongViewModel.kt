@@ -18,10 +18,7 @@ import com.example.song.data.model.Song
 import com.example.song.data.repository.SongRepository
 import com.example.song.service.MusicService
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -53,6 +50,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentQueue = MutableStateFlow<List<Song>>(emptyList())
     val currentQueue: StateFlow<List<Song>> = _currentQueue.asStateFlow()
+
+    private val _repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
+    val repeatMode: StateFlow<Int> = _repeatMode.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
+        if (query.isBlank()) songs
+        else songs.filter { 
+            it.title.contains(query, ignoreCase = true) || 
+            it.artist.contains(query, ignoreCase = true) 
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
         val database = AppDatabase.getDatabase(application)
@@ -93,7 +104,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                             _duration.value = duration
                         }
                     }
+
+                    override fun onRepeatModeChanged(repeatMode: Int) {
+                        _repeatMode.value = repeatMode
+                    }
                 })
+                // Set initial repeat mode
+                repeatMode = _repeatMode.value
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -184,6 +201,22 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 it.seekToPrevious()
             }
         }
+    }
+
+    fun toggleRepeatMode() {
+        mediaController?.let {
+            val nextMode = when (it.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+            it.repeatMode = nextMode
+            _repeatMode.value = nextMode
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
     }
 
     private fun Song.toMediaItem(): MediaItem {

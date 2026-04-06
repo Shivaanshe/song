@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,9 +41,12 @@ fun LibraryScreen(
     onFavoritesClick: () -> Unit,
     onSongClick: () -> Unit
 ) {
-    val songs by viewModel.allSongs.collectAsState()
+    val songs by viewModel.filteredSongs.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    var isSearching by remember { mutableStateOf(false) }
+    
     val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(
@@ -88,28 +92,59 @@ fun LibraryScreen(
                         containerColor = Color.Transparent
                     ),
                     title = {
-                        Text(
-                            "My Library",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF333333)
+                        if (isSearching) {
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                placeholder = { Text("Search songs...") },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.White.copy(alpha = 0.2f),
+                                    unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                trailingIcon = {
+                                    IconButton(onClick = { 
+                                        isSearching = false
+                                        viewModel.setSearchQuery("")
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close search")
+                                    }
+                                }
                             )
-                        )
+                        } else {
+                            Text(
+                                "My Library",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333)
+                                )
+                            )
+                        }
                     },
                     navigationIcon = {
-                        IconButton(
-                            onClick = { /* Search */ },
-                            modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                        ) {
-                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
+                        if (!isSearching) {
+                            IconButton(
+                                onClick = { isSearching = true },
+                                modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
+                            }
                         }
                     },
                     actions = {
-                        IconButton(
-                            onClick = { launcher.launch(arrayOf("audio/*")) },
-                            modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Song", tint = Color(0xFF424242))
+                        if (!isSearching) {
+                            IconButton(
+                                onClick = { launcher.launch(arrayOf("audio/*")) },
+                                modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Song", tint = Color(0xFF424242))
+                            }
                         }
                     }
                 )
@@ -121,44 +156,46 @@ fun LibraryScreen(
                     .padding(padding),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                // Collections Section (Playlists)
-                item {
-                    Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                if (!isSearching) {
+                    // Collections Section (Playlists)
+                    item {
+                        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                            Text(
+                                "Collections",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF424242)
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                contentPadding = PaddingValues(end = 24.dp)
+                            ) {
+                                items(playlists) { playlist ->
+                                    PlaylistCard(playlist) { onPlaylistClick(playlist) }
+                                }
+                                // Hardcoded Favorites Card
+                                item {
+                                    FavoritesCollectionCard(favoriteSongs.size) {
+                                        onFavoritesClick()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Recommended Section Header
+                    item {
                         Text(
-                            "Collections",
+                            "Recommended",
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF424242)
                             )
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(end = 24.dp)
-                        ) {
-                            items(playlists) { playlist ->
-                                PlaylistCard(playlist) { onPlaylistClick(playlist) }
-                            }
-                            // Hardcoded Favorites Card
-                            item {
-                                FavoritesCollectionCard(favoriteSongs.size) {
-                                    onFavoritesClick()
-                                }
-                            }
-                        }
                     }
-                }
-
-                // Recommended Section (All Songs)
-                item {
-                    Text(
-                        "Recommended",
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF424242)
-                        )
-                    )
                 }
 
                 items(songs) { song ->
