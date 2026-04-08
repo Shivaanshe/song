@@ -96,7 +96,7 @@ fun PlayerScreen(
                                     else -> Icons.Default.Repeat
                                 },
                                 contentDescription = "Repeat Mode",
-                                tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFFE91E63)
+                                tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFF4CAF50)
                             )
                         }
                     }

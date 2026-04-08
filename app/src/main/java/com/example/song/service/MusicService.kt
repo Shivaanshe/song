@@ -11,10 +11,21 @@ import com.example.song.MainActivity
 class MusicService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private lateinit var player: ExoPlayer
 
     override fun onCreate() {
         super.onCreate()
-        val player = ExoPlayer.Builder(this).build()
+        player = ExoPlayer.Builder(this).build()
+        
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && player.repeatMode == Player.REPEAT_MODE_ONE) {
+                    // Logic for "Repeat 1" handled by ExoPlayer automatically, 
+                    // but we ensure consistency here if needed.
+                }
+            }
+        })
+
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(
                 PendingIntent.getActivity(

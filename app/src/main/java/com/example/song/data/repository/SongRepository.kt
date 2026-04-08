@@ -6,13 +6,27 @@ import com.example.song.data.dao.SongDao
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.PlaylistSongCrossRef
 import com.example.song.data.model.Song
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.youtubedl_android.mapper.VideoInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
+import java.net.URL
+import java.util.UUID
+import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 class SongRepository(
     private val songDao: SongDao,
-    private val playlistDao: PlaylistDao
+    private val playlistDao: PlaylistDao,
+    private val baseDir: File
 ) {
     private val iTunesService: ITunesService by lazy {
         Retrofit.Builder()
@@ -21,6 +35,9 @@ class SongRepository(
             .build()
             .create(ITunesService::class.java)
     }
+
+    private var downloadJob: Job? = null
+    private var currentRequestId: String? = null
 
     val allSongs: Flow<List<Song>> = songDao.getAllSongs()
     val allPlaylists: Flow<List<Playlist>> = playlistDao.getAllPlaylists()
@@ -69,5 +86,130 @@ class SongRepository(
 
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>> {
         return playlistDao.getSongsInPlaylist(playlistId)
+    }
+
+    fun cancelDownload() {
+        currentRequestId?.let { 
+            try {
+                YoutubeDL.getInstance().destroyProcessById(it)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        downloadJob?.cancel()
+        downloadJob = null
+    }
+
+    suspend fun downloadYouTubeAudio(url: String, progressCallback: (Float, Long) -> Unit) = withContext(Dispatchers.IO) {
+        val requestId = UUID.randomUUID().toString()
+        currentRequestId = requestId
+        
+        val musicDir = File(baseDir, "Music")
+        if (!musicDir.exists()) musicDir.mkdirs()
+
+        try {
+            Log.d("SongRepository", "Starting download for URL: $url")
+            
+            // 1. Create a separate request for getting info
+            val infoRequest = YoutubeDLRequest(url).apply {
+                addOption("--no-check-certificate")
+                addOption("--yes-playlist")
+                addOption("--playlist-items", "1")
+            }
+            
+            val videoInfo: VideoInfo = try {
+                YoutubeDL.getInstance().getInfo(infoRequest)
+            } catch (e: Exception) {
+                Log.e("SongRepository", "Failed to get video info", e)
+                throw Exception("Failed to get video info: ${e.message}")
+            }
+
+            if (videoInfo.duration > 1200) { // 20 mins limit
+                throw Exception("Video is too long (> 20 mins)")
+            }
+
+            // 2. Create a fresh request for the actual download
+            val downloadRequest = YoutubeDLRequest(url).apply {
+                addOption("--extract-audio")
+                addOption("--audio-format", "mp3")
+                // Use requestId as filename to avoid issues with special characters in titles
+                addOption("--output", "${musicDir.absolutePath}/$requestId.%(ext)s")
+                addOption("--no-check-certificate")
+                addOption("--yes-playlist")
+                addOption("--playlist-items", "1")
+            }
+
+            // Perform download
+            try {
+                val response = YoutubeDL.getInstance().execute(downloadRequest, requestId) { progress, eta, line ->
+                    Log.d("SongRepository", "Progress: $progress, ETA: $eta, Line: $line")
+                    progressCallback(progress, eta)
+                }
+                Log.d("SongRepository", "Download finished. Exit code: ${response.exitCode}")
+            } catch (e: Exception) {
+                Log.e("SongRepository", "Execution failed", e)
+                throw Exception("Download failed: ${e.message}")
+            }
+
+            // 3. Fallback check for different extensions (yt-dlp might fail to convert to mp3 if FFmpeg is missing, 
+            // though we initialized it in SongApplication)
+            val possibleExtensions = listOf("mp3", "m4a", "webm", "opus", "wav")
+            var downloadedFile: File? = null
+            
+            for (ext in possibleExtensions) {
+                val file = File(musicDir, "$requestId.$ext")
+                if (file.exists()) {
+                    downloadedFile = file
+                    break
+                }
+            }
+            
+            if (downloadedFile != null && downloadedFile.exists()) {
+                Log.d("SongRepository", "Success! File found: ${downloadedFile.absolutePath}")
+                
+                val extension = downloadedFile.extension
+                // Rename to something more friendly but safe
+                val safeTitle = (videoInfo.title ?: "Downloaded Song")
+                    .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                var finalFile = File(musicDir, "$safeTitle.$extension")
+                
+                // Handle duplicate names
+                var counter = 1
+                while (finalFile.exists()) {
+                    finalFile = File(musicDir, "$safeTitle ($counter).$extension")
+                    counter++
+                }
+                
+                if (downloadedFile.renameTo(finalFile)) {
+                    val song = Song(
+                        title = videoInfo.title ?: finalFile.nameWithoutExtension,
+                        artist = videoInfo.uploader ?: "YouTube",
+                        audioUri = finalFile.absolutePath,
+                        imageUrl = videoInfo.thumbnail,
+                        duration = videoInfo.duration * 1000L
+                    )
+                    insertSong(song)
+                } else {
+                    // If rename fails, use the requestId one
+                    val song = Song(
+                        title = videoInfo.title ?: downloadedFile.nameWithoutExtension,
+                        artist = videoInfo.uploader ?: "YouTube",
+                        audioUri = downloadedFile.absolutePath,
+                        imageUrl = videoInfo.thumbnail,
+                        duration = videoInfo.duration * 1000L
+                    )
+                    insertSong(song)
+                }
+            } else {
+                val existingFiles = musicDir.list()?.joinToString(", ") ?: "none"
+                Log.e("SongRepository", "File $requestId.mp3 not found. Existing files: $existingFiles")
+                throw Exception("Downloaded file not found in Music folder")
+            }
+        } catch (e: Exception) {
+            Log.e("SongRepository", "General error during download", e)
+            throw e
+        } finally {
+            currentRequestId = null
+        }
     }
 }

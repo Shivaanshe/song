@@ -5,7 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -13,24 +15,31 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
+import com.example.song.viewmodel.DownloadState
 import com.example.song.viewmodel.SongViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,7 +54,22 @@ fun LibraryScreen(
     val playlists by viewModel.playlists.collectAsState()
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val downloadState by viewModel.downloadState.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
+    var showPlaylistDialog by remember { mutableStateOf(false) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
+    var youtubeUrl by remember { mutableStateOf("") }
+    val isUrlValid = remember(youtubeUrl) { 
+        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")))
+    }
+
+    val addIconRotation by animateFloatAsState(
+        targetValue = if (showAddMenu) 135f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "AddIconRotation"
+    )
     
     val context = LocalContext.current
 
@@ -140,10 +164,19 @@ fun LibraryScreen(
                     actions = {
                         if (!isSearching) {
                             IconButton(
-                                onClick = { launcher.launch(arrayOf("audio/*")) },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                onClick = { showAddMenu = !showAddMenu },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = "Add Song", tint = Color(0xFF424242))
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Options",
+                                    tint = Color(0xFF424242),
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .rotate(addIconRotation)
+                                )
                             }
                         }
                     }
@@ -214,6 +247,252 @@ fun LibraryScreen(
                     )
                 }
             }
+        }
+
+        // Click-away layer
+        if (showAddMenu) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showAddMenu = false }
+            )
+        }
+
+        // Add Options Menu
+        AnimatedVisibility(
+            visible = showAddMenu,
+            enter = fadeIn() + scaleIn(initialScale = 0.4f, transformOrigin = TransformOrigin(0.9f, 0.1f)),
+            exit = fadeOut() + scaleOut(targetScale = 0.4f, transformOrigin = TransformOrigin(0.9f, 0.1f)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 70.dp, end = 16.dp)
+                .zIndex(10f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(260.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color.White.copy(alpha = 0.4f))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(28.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AddMenuOption(
+                        text = "Create Playlist",
+                        icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+                        onClick = {
+                            showAddMenu = false
+                            showPlaylistDialog = true
+                        }
+                    )
+                    AddMenuOption(
+                        text = "Add Songs",
+                        icon = Icons.Default.LibraryMusic,
+                        onClick = {
+                            showAddMenu = false
+                            launcher.launch(arrayOf("audio/*"))
+                        }
+                    )
+                    AddMenuOption(
+                        text = "Download from YT",
+                        icon = Icons.Default.CloudDownload,
+                        onClick = {
+                            showAddMenu = false
+                            showDownloadDialog = true
+                        }
+                    )
+                }
+            }
+        }
+
+        if (showPlaylistDialog) {
+            AlertDialog(
+                onDismissRequest = { showPlaylistDialog = false },
+                title = { Text("New Playlist") },
+                text = {
+                    TextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        placeholder = { Text("Playlist Name") },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent
+                        )
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (newPlaylistName.isNotBlank()) {
+                            viewModel.createPlaylist(newPlaylistName)
+                            newPlaylistName = ""
+                            showPlaylistDialog = false
+                        }
+                    }) {
+                        Text("Create")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPlaylistDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+        
+        if (showDownloadDialog) {
+            AlertDialog(
+                onDismissRequest = { 
+                    if (downloadState !is DownloadState.Downloading) {
+                        showDownloadDialog = false
+                    }
+                },
+                title = { 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFFE91E63))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Download from YT")
+                    }
+                },
+                text = {
+                    Column {
+                        if (downloadState is DownloadState.Downloading) {
+                            val progress = (downloadState as DownloadState.Downloading).progress
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { if (progress > 0) progress / 100f else 0f },
+                                    color = Color(0xFFE91E63)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    if (progress > 0) "Downloading... ${progress.toInt()}%" else "Preparing...",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                        } else {
+                            Text(
+                                "Enter the YouTube video URL to extract and download audio.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            TextField(
+                                value = youtubeUrl,
+                                onValueChange = { youtubeUrl = it },
+                                placeholder = { Text("https://youtube.com/...") },
+                                singleLine = true,
+                                isError = !isUrlValid && youtubeUrl.isNotBlank(),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Black.copy(alpha = 0.05f),
+                                    unfocusedContainerColor = Color.Black.copy(alpha = 0.03f),
+                                    focusedIndicatorColor = Color(0xFFE91E63),
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            if (!isUrlValid && youtubeUrl.isNotBlank()) {
+                                Text(
+                                    "Invalid YouTube URL",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(top = 4.dp, start = 8.dp)
+                                )
+                            }
+
+                            if (downloadState is DownloadState.Error) {
+                                Text(
+                                    (downloadState as DownloadState.Error).message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (downloadState is DownloadState.Downloading) {
+                        TextButton(
+                            onClick = { viewModel.cancelDownload() },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Cancel Download")
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (youtubeUrl.isNotBlank() && isUrlValid) {
+                                    viewModel.downloadFromYoutube(youtubeUrl)
+                                    youtubeUrl = ""
+                                }
+                            },
+                            enabled = youtubeUrl.isNotBlank() && isUrlValid,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFE91E63),
+                                disabledContainerColor = Color(0xFFE91E63).copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Download")
+                        }
+                    }
+                },
+                dismissButton = {
+                    if (downloadState !is DownloadState.Downloading) {
+                        TextButton(onClick = { 
+                            showDownloadDialog = false 
+                            viewModel.resetDownloadState()
+                        }) {
+                            Text("Close", color = Color.Gray)
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(28.dp),
+                containerColor = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun AddMenuOption(text: String, icon: ImageVector, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.White.copy(alpha = 0.2f))
+            .clickable { onClick() }
+            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(Color.Black.copy(alpha = 0.05f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = Color(0xFF424242), modifier = Modifier.size(20.dp))
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF333333)
+                )
+            )
         }
     }
 }

@@ -9,7 +9,9 @@
 
 
     <application
-        android:theme="@style/Theme.Song">
+        android:name=".SongApplication"
+        android:theme="@style/Theme.Song"
+        android:extractNativeLibs="true">
 
         <activity
             android:name=".MainActivity"

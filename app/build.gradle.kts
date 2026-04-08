@@ -1,23 +1,42 @@
 plugins {
-    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
 
 android {
     namespace = "com.example.song"
-    compileSdk = 36
+    compileSdk = 35
 
 
     defaultConfig {
         applicationId = "com.example.song"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        ndk {
+            abiFilters.add("armeabi-v7a")
+            abiFilters.add("arm64-v8a")
+            abiFilters.add("x86")
+            abiFilters.add("x86_64")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        dex {
+            useLegacyPackaging = true
+        }
     }
 
     buildTypes {
@@ -74,6 +93,11 @@ dependencies {
     
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // YouTube Download
+    val youtubeDlVersion = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubeDlVersion")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubeDlVersion")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

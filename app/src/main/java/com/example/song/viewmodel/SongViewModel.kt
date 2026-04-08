@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -57,6 +58,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
+    val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
+
     val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
         if (query.isBlank()) songs
         else songs.filter { 
@@ -67,7 +71,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val database = AppDatabase.getDatabase(application)
-        repository = SongRepository(database.songDao(), database.playlistDao())
+        repository = SongRepository(
+            database.songDao(),
+            database.playlistDao(),
+            application.filesDir // Use filesDir for persistent storage
+        )
 
         viewModelScope.launch {
             repository.allSongs.collect { _allSongs.value = it }
@@ -109,8 +117,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         _repeatMode.value = repeatMode
                     }
                 })
-                // Set initial repeat mode
-                repeatMode = _repeatMode.value
+                // Initial state sync
+                _repeatMode.value = repeatMode
+                _isPlaying.value = isPlaying
+                _currentPlayingSong.value = currentMediaItem?.let { item ->
+                    val songId = item.mediaId.toIntOrNull()
+                    _allSongs.value.find { it.id == songId }
+                }
             }
         }, ContextCompat.getMainExecutor(context))
     }
@@ -183,7 +196,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
         
         mediaController?.apply {
+            // Respect the current repeat mode when setting new media items
+            val currentMode = repeatMode 
             setMediaItems(queue.map { it.toMediaItem() }, index, 0L)
+            repeatMode = currentMode
             prepare()
             play()
         }
@@ -206,9 +222,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleRepeatMode() {
         mediaController?.let {
             val nextMode = when (it.repeatMode) {
-                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                else -> Player.REPEAT_MODE_OFF
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL // Repeat All (Green)
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE // Repeat One (Green with 1)
+                else -> Player.REPEAT_MODE_OFF // Repeat Off (Gray)
             }
             it.repeatMode = nextMode
             _repeatMode.value = nextMode
@@ -219,15 +235,52 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
     }
 
+    fun downloadFromYoutube(url: String) {
+        viewModelScope.launch {
+            _downloadState.value = DownloadState.Downloading(0f)
+            try {
+                repository.downloadYouTubeAudio(url) { progress, _ ->
+                    _downloadState.value = DownloadState.Downloading(progress)
+                }
+                _downloadState.value = DownloadState.Success
+                delay(3000)
+                _downloadState.value = DownloadState.Idle
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException || e.message == "Download cancelled") {
+                    _downloadState.value = DownloadState.Idle
+                } else {
+                    _downloadState.value = DownloadState.Error(e.message ?: "Unknown error")
+                    delay(3000)
+                    _downloadState.value = DownloadState.Idle
+                }
+            }
+        }
+    }
+
+    fun cancelDownload() {
+        repository.cancelDownload()
+        _downloadState.value = DownloadState.Idle
+    }
+
+    fun resetDownloadState() {
+        _downloadState.value = DownloadState.Idle
+    }
+
     private fun Song.toMediaItem(): MediaItem {
+        val uri = if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
+            Uri.parse(audioUri)
+        } else {
+            Uri.fromFile(File(audioUri))
+        }
+
         return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(audioUri)
+            .setUri(uri)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
                     .setArtist(artist)
-                    .setArtworkUri(Uri.parse(imageUrl ?: ""))
+                    .setArtworkUri(imageUrl?.let { Uri.parse(it) })
                     .build()
             )
             .build()
@@ -243,4 +296,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         mediaController?.release()
         super.onCleared()
     }
+}
+
+sealed class DownloadState {
+    object Idle : DownloadState()
+    data class Downloading(val progress: Float) : DownloadState()
+    object Success : DownloadState()
+    data class Error(val message: String) : DownloadState()
 }
