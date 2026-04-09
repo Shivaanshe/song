@@ -2,6 +2,7 @@ package com.example.song.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,15 +112,16 @@ fun PlayerScreen(
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.weight(0.1f))
+                Spacer(modifier = Modifier.weight(0.15f))
 
-                // Album Art with Smooth Transition
+                // Album Art with Shadow and Glass Border
                 Box(
                     modifier = Modifier
-                        .size(300.dp)
-                        .shadow(24.dp, RoundedCornerShape(32.dp))
-                        .clip(RoundedCornerShape(32.dp))
+                        .size(320.dp)
+                        .shadow(32.dp, RoundedCornerShape(40.dp))
+                        .clip(RoundedCornerShape(40.dp))
                         .background(Color.White.copy(alpha = 0.2f))
+                        .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(40.dp))
                 ) {
                     Crossfade(targetState = song?.imageUrl, label = "AlbumArt") { url ->
                         AsyncImage(
@@ -132,60 +135,72 @@ fun PlayerScreen(
 
                 Spacer(modifier = Modifier.weight(0.1f))
 
-                // Song Info
-                Row(
+                // Song Info with Better Alignment
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    AnimatedContent(
+                        targetState = song?.title ?: "No Song",
+                        transitionSpec = {
+                            fadeIn() + slideInVertically { it / 2 } togetherWith
+                                    fadeOut() + slideOutVertically { -it / 2 }
+                        },
+                        label = "SongTitle"
+                    ) { title ->
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF333333),
+                                fontSize = 28.sp,
+                                textAlign = TextAlign.Center
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
                         AnimatedContent(
-                            targetState = song?.title ?: "No Song",
-                            transitionSpec = {
-                                fadeIn() + slideInVertically { it / 2 } togetherWith
-                                        fadeOut() + slideOutVertically { -it / 2 }
-                            },
-                            label = "SongTitle"
-                        ) { title ->
+                            targetState = song?.artist ?: "Unknown Artist",
+                            modifier = Modifier.weight(1f, fill = false),
+                            label = "ArtistName"
+                        ) { artist ->
                             Text(
-                                text = title,
-                                style = MaterialTheme.typography.headlineSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF333333),
-                                    fontSize = 24.sp
+                                text = artist,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    color = Color(0xFF666666),
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 20.sp
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        AnimatedContent(
-                            targetState = song?.artist ?: "Unknown Artist",
-                            label = "ArtistName"
-                        ) { artist ->
-                            Text(
-                                text = artist,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    color = Color(0xFF666666),
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                maxLines = 1
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        IconButton(
+                            onClick = { song?.let { viewModel.updateFavorite(it, !it.isFavorite) } },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (song?.isFavorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Favorite",
+                                tint = if (song?.isFavorite == true) Color(0xFFE91E63) else Color(0xFF424242),
+                                modifier = Modifier.size(28.dp)
                             )
                         }
                     }
-
-                    IconButton(onClick = { 
-                        song?.let { viewModel.updateFavorite(it, !it.isFavorite) }
-                    }) {
-                        Icon(
-                            imageVector = if (song?.isFavorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (song?.isFavorite == true) Color(0xFFE91E63) else Color(0xFF424242),
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
                 // Seekbar
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -201,47 +216,49 @@ fun PlayerScreen(
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
                             formatTime(currentPosition),
                             color = Color(0xFF555555),
-                            style = MaterialTheme.typography.labelMedium
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 14.sp)
                         )
                         Text(
                             formatTime(duration),
                             color = Color(0xFF555555),
-                            style = MaterialTheme.typography.labelMedium
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 14.sp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(40.dp))
 
                 // Controls
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
+                    horizontalArrangement = Arrangement.spacedBy(32.dp)
                 ) {
                     IconButton(
                         onClick = { viewModel.skipToPrevious() },
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(64.dp)
                             .background(Color.White.copy(alpha = 0.4f), CircleShape)
                     ) {
                         Icon(
                             Icons.Default.SkipPrevious,
                             contentDescription = null,
                             tint = Color(0xFF424242),
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
 
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
-                            .shadow(8.dp, CircleShape)
+                            .size(88.dp)
+                            .shadow(12.dp, CircleShape)
                             .clip(CircleShape)
                             .background(
                                 brush = Brush.linearGradient(
@@ -255,26 +272,26 @@ fun PlayerScreen(
                             imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(48.dp)
                         )
                     }
 
                     IconButton(
                         onClick = { viewModel.skipToNext() },
                         modifier = Modifier
-                            .size(56.dp)
+                            .size(64.dp)
                             .background(Color.White.copy(alpha = 0.4f), CircleShape)
                     ) {
                         Icon(
                             Icons.Default.SkipNext,
                             contentDescription = null,
                             tint = Color(0xFF424242),
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.weight(0.1f))
+                Spacer(modifier = Modifier.weight(0.2f))
             }
         }
     }

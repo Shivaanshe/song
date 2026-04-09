@@ -9,11 +9,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -85,53 +87,67 @@ fun MainApp(viewModel: SongViewModel) {
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
 
-    Scaffold(
-        bottomBar = {
-            if (currentDestination?.route != "player") {
-                NowPlayingBar(
-                    song = currentSong,
-                    isPlaying = isPlaying,
-                    onTogglePlay = { viewModel.togglePlayPause() },
-                    onClick = { navController.navigate("player") }
-                )
+    val backgroundGradient = Brush.verticalGradient(
+        colors = listOf(
+            Color(0xFFD1C4E9),
+            Color(0xFFBBDEFB)
+        )
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundGradient)
+    ) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            bottomBar = {
+                if (currentDestination?.route != "player") {
+                    NowPlayingBar(
+                        song = currentSong,
+                        isPlaying = isPlaying,
+                        onTogglePlay = { viewModel.togglePlayPause() },
+                        onClick = { navController.navigate("player") }
+                    )
+                }
             }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "library",
-            modifier = Modifier.padding(if (currentDestination?.route == "player") PaddingValues() else innerPadding)
-        ) {
-            composable("library") {
-                LibraryScreen(
-                    viewModel = viewModel,
-                    onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
-                    onFavoritesClick = { navController.navigate("playlist/-1/Favorites") },
-                    onSongClick = { navController.navigate("player") }
-                )
-            }
-            composable(
-                "playlist/{playlistId}/{playlistName}",
-                arguments = listOf(
-                    navArgument("playlistId") { type = NavType.IntType },
-                    navArgument("playlistName") { type = NavType.StringType }
-                )
-            ) { backStackEntry ->
-                val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
-                val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
-                PlaylistDetailScreen(
-                    playlistId = playlistId,
-                    playlistName = playlistName,
-                    viewModel = viewModel,
-                    onBackClick = { navController.popBackStack() },
-                    onSongClick = { navController.navigate("player") }
-                )
-            }
-            composable("player") {
-                PlayerScreen(
-                    viewModel = viewModel,
-                    onBackClick = { navController.popBackStack() }
-                )
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = "library",
+                modifier = Modifier.padding(if (currentDestination?.route == "player") PaddingValues() else innerPadding)
+            ) {
+                composable("library") {
+                    LibraryScreen(
+                        viewModel = viewModel,
+                        onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                        onFavoritesClick = { navController.navigate("playlist/-1/Favorites") },
+                        onSongClick = { navController.navigate("player") }
+                    )
+                }
+                composable(
+                    "playlist/{playlistId}/{playlistName}",
+                    arguments = listOf(
+                        navArgument("playlistId") { type = NavType.IntType },
+                        navArgument("playlistName") { type = NavType.StringType }
+                    )
+                ) { backStackEntry ->
+                    val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
+                    val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
+                    PlaylistDetailScreen(
+                        playlistId = playlistId,
+                        playlistName = playlistName,
+                        viewModel = viewModel,
+                        onBackClick = { navController.popBackStack() },
+                        onSongClick = { navController.navigate("player") }
+                    )
+                }
+                composable("player") {
+                    PlayerScreen(
+                        viewModel = viewModel,
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
             }
         }
     }

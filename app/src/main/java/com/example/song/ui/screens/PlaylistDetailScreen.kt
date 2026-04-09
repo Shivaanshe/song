@@ -4,6 +4,7 @@ import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.example.song.ui.components.SongListItem
@@ -252,27 +255,113 @@ fun PlaylistDetailScreen(
     }
 
     if (showAddSongDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddSongDialog = false },
-            title = { Text("Add Song to Playlist") },
-            text = {
-                LazyColumn(modifier = Modifier.height(300.dp)) {
-                    items(allSongs) { song ->
-                        ListItem(
-                            headlineContent = { Text(song.title) },
-                            modifier = Modifier.clickable {
-                                viewModel.addSongToPlaylist(song.id, playlistId)
-                                showAddSongDialog = false
-                            }
+        Dialog(onDismissRequest = { showAddSongDialog = false }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(550.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = Color.Transparent
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xFF2D2D3A), Color(0xFF1A1A24))
+                            )
                         )
+                        .padding(24.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "Add Song to Playlist",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 26.sp
+                            ),
+                            modifier = Modifier.padding(bottom = 20.dp)
+                        )
+
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(20.dp)),
+                            color = Color.Black.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(8.dp)
+                            ) {
+                                items(allSongs) { song ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                viewModel.addSongToPlaylist(song.id, playlistId)
+                                                showAddSongDialog = false
+                                            }
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        AsyncImage(
+                                            model = song.imageUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color.White.copy(alpha = 0.1f)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column {
+                                            Text(
+                                                text = song.title,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    color = Color.White,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                ),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = song.artist,
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    color = Color.White.copy(alpha = 0.5f),
+                                                    fontSize = 14.sp
+                                                ),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        TextButton(
+                            onClick = { showAddSongDialog = false },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text(
+                                "Close",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    color = Color(0xFF4CAF50),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            )
+                        }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showAddSongDialog = false }) {
-                    Text("Close")
-                }
             }
-        )
+        }
     }
 }
