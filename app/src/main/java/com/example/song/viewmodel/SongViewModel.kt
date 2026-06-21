@@ -80,7 +80,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch {
-            repository.allSongs.collect { _allSongs.value = it }
+            repository.allSongs.collect { songs ->
+                _allSongs.value = songs
+                // Update current playing song from the latest list to reflect changes (like favorite status)
+                val currentId = _currentPlayingSong.value?.id 
+                    ?: mediaController?.currentMediaItem?.mediaId?.toIntOrNull()
+                
+                if (currentId != null) {
+                    songs.find { it.id == currentId }?.let { updated ->
+                        _currentPlayingSong.value = updated
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             repository.allPlaylists.collect { _playlists.value = it }
@@ -101,7 +112,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         mediaItem?.let { item ->
                             val songId = item.mediaId.toIntOrNull()
-                            _currentPlayingSong.value = _currentQueue.value.find { it.id == songId }
+                            _currentPlayingSong.value = _allSongs.value.find { it.id == songId }
                         }
                     }
 
@@ -174,7 +185,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateFavorite(song: Song, isFavorite: Boolean) {
         viewModelScope.launch {
-            repository.updateSong(song.copy(isFavorite = isFavorite))
+            val updatedSong = song.copy(isFavorite = isFavorite)
+            repository.updateSong(updatedSong)
+            // Explicitly update currentPlayingSong if it's the one being modified
+            // to ensure immediate UI feedback
+            if (_currentPlayingSong.value?.id == song.id) {
+                _currentPlayingSong.value = updatedSong
+            }
         }
     }
 
