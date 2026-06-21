@@ -237,6 +237,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadFromYoutube(url: String) {
         viewModelScope.launch {
+            // Check if engine is ready
+            val isEngineReady = com.example.song.SongApplication.getInstance().isReady.value
+            if (!isEngineReady) {
+                _downloadState.value = DownloadState.Error("Music engine is still initializing. Please wait.")
+                delay(3000)
+                _downloadState.value = DownloadState.Idle
+                return@launch
+            }
+
             _downloadState.value = DownloadState.Downloading(0f)
             try {
                 repository.downloadYouTubeAudio(url) { progress, _ ->

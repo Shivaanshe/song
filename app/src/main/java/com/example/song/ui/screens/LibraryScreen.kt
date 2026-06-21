@@ -431,8 +431,9 @@ fun LibraryScreen(
                         Button(
                             onClick = {
                                 if (youtubeUrl.isNotBlank() && isUrlValid) {
-                                    viewModel.downloadFromYoutube(youtubeUrl)
+                                    val urlToDownload = youtubeUrl.trim()
                                     youtubeUrl = ""
+                                    viewModel.downloadFromYoutube(urlToDownload)
                                 }
                             },
                             enabled = youtubeUrl.isNotBlank() && isUrlValid,

@@ -115,6 +115,7 @@ class SongRepository(
                 addOption("--no-check-certificate")
                 addOption("--yes-playlist")
                 addOption("--playlist-items", "1")
+                addOption("--no-cache-dir")
             }
             
             val videoInfo: VideoInfo = try {
@@ -137,6 +138,7 @@ class SongRepository(
                 addOption("--no-check-certificate")
                 addOption("--yes-playlist")
                 addOption("--playlist-items", "1")
+                addOption("--no-cache-dir") // Disable cache to prevent old video data reuse
             }
 
             // Perform download
@@ -171,6 +173,7 @@ class SongRepository(
                 // Rename to something more friendly but safe
                 val safeTitle = (videoInfo.title ?: "Downloaded Song")
                     .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                    .take(100) // Limit length
                 var finalFile = File(musicDir, "$safeTitle.$extension")
                 
                 // Handle duplicate names
