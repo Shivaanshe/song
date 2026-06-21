@@ -511,9 +511,10 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(120.dp)
-                .shadow(8.dp, RoundedCornerShape(24.dp))
+                .shadow(12.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color.White.copy(alpha = 0.3f))
+                .background(Color.White.copy(alpha = 0.2f))
+                .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
         ) {
             Icon(
                 Icons.Default.MusicNote,
@@ -525,14 +526,17 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = playlist.name,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF333333)
+            ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = "Playlist",
             style = MaterialTheme.typography.labelSmall,
-            color = Color.Gray
+            color = Color(0xFF666666)
         )
     }
 }
@@ -548,13 +552,14 @@ fun FavoritesCollectionCard(count: Int, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(120.dp)
-                .shadow(8.dp, RoundedCornerShape(24.dp))
+                .shadow(12.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
                 .background(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFFF4081), Color(0xFFE040FB))
+                        colors = listOf(Color(0xFFFF4081).copy(alpha = 0.8f), Color(0xFFE040FB).copy(alpha = 0.8f))
                     )
                 )
+                .border(1.5.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
         ) {
             Icon(
                 Icons.Default.Favorite,
@@ -566,13 +571,16 @@ fun FavoritesCollectionCard(count: Int, onClick: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Favorites",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF333333)
+            ),
             maxLines = 1
         )
         Text(
             text = "$count songs",
             style = MaterialTheme.typography.labelSmall,
-            color = Color.Gray
+            color = Color(0xFF666666)
         )
     }
 }

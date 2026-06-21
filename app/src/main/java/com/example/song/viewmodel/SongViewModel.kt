@@ -61,6 +61,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
+    private var isUserSeeking = false
+
     val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
         if (query.isBlank()) songs
         else songs.filter { 
@@ -107,6 +109,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         _isPlaying.value = playing
                     }
 
+                    override fun onPositionDiscontinuity(
+                        oldPosition: Player.PositionInfo,
+                        newPosition: Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION || reason == Player.DISCONTINUITY_REASON_SKIP) {
+                            _currentPosition.value = 0L
+                        }
+                    }
+
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
                             _duration.value = duration
@@ -131,16 +143,27 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private fun startProgressUpdate() {
         viewModelScope.launch {
             while (isActive) {
-                mediaController?.let {
-                    _currentPosition.value = it.currentPosition
+                if (!isUserSeeking) {
+                    mediaController?.let {
+                        _currentPosition.value = it.currentPosition
+                    }
                 }
-                delay(1000)
+                delay(500)
             }
         }
     }
 
+    fun setUserSeeking(seeking: Boolean) {
+        isUserSeeking = seeking
+    }
+
+    fun updateSeekPosition(position: Long) {
+        _currentPosition.value = position
+    }
+
     fun seekTo(position: Long) {
         mediaController?.seekTo(position)
+        isUserSeeking = false
     }
 
     fun addSong(song: Song) {

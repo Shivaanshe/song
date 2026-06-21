@@ -41,6 +41,8 @@ fun PlayerScreen(
     val duration by viewModel.duration.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
 
+    var sliderPosition by remember { mutableStateOf<Float?>(null) }
+
     // Vibrant background gradient
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(
@@ -205,8 +207,16 @@ fun PlayerScreen(
                 // Seekbar
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Slider(
-                        value = currentPosition.toFloat(),
-                        onValueChange = { viewModel.seekTo(it.toLong()) },
+                        value = sliderPosition ?: currentPosition.toFloat(),
+                        onValueChange = { 
+                            sliderPosition = it
+                            viewModel.setUserSeeking(true)
+                            viewModel.updateSeekPosition(it.toLong())
+                        },
+                        onValueChangeFinished = {
+                            viewModel.seekTo(sliderPosition?.toLong() ?: currentPosition)
+                            sliderPosition = null
+                        },
                         valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
@@ -222,7 +232,7 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            formatTime(currentPosition),
+                            formatTime(sliderPosition?.toLong() ?: currentPosition),
                             color = Color(0xFF555555),
                             style = MaterialTheme.typography.labelMedium.copy(fontSize = 14.sp)
                         )
