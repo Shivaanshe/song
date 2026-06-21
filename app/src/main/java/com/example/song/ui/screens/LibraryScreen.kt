@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import com.example.song.SongApplication
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
@@ -55,6 +56,7 @@ fun LibraryScreen(
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
+    val isEngineReady by SongApplication.getInstance().isReady.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -430,20 +432,20 @@ fun LibraryScreen(
                     } else {
                         Button(
                             onClick = {
-                                if (youtubeUrl.isNotBlank() && isUrlValid) {
+                                if (youtubeUrl.isNotBlank() && isUrlValid && isEngineReady) {
                                     val urlToDownload = youtubeUrl.trim()
                                     youtubeUrl = ""
                                     viewModel.downloadFromYoutube(urlToDownload)
                                 }
                             },
-                            enabled = youtubeUrl.isNotBlank() && isUrlValid,
+                            enabled = youtubeUrl.isNotBlank() && isUrlValid && isEngineReady,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFFE91E63),
                                 disabledContainerColor = Color(0xFFE91E63).copy(alpha = 0.5f)
                             ),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("Download")
+                            Text(if (isEngineReady) "Download" else "Initializing...")
                         }
                     }
                 },
