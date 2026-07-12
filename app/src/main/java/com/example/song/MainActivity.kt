@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
                     hasPermission = isGranted
                 }
 
-                LaunchedEffect(Unit) {
+                LaunchedEffect(hasPermission) {
                     if (!hasPermission) {
                         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             Manifest.permission.READ_MEDIA_AUDIO
@@ -63,6 +63,8 @@ class MainActivity : ComponentActivity() {
                             Manifest.permission.READ_EXTERNAL_STORAGE
                         }
                         permissionLauncher.launch(permission)
+                    } else {
+                        viewModel.initMediaController(this@MainActivity)
                     }
                 }
 
@@ -144,7 +146,7 @@ fun MainApp(viewModel: SongViewModel) {
                     )
                 }
                 composable("discover") {
-                    com.example.song.ui.screens.DiscoverScreen()
+                    com.example.song.ui.screens.DiscoverScreen(viewModel = viewModel)
                 }
                 composable(
                     "playlist/{playlistId}/{playlistName}",

@@ -6,19 +6,22 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.song.data.dao.SongDao
 import com.example.song.data.dao.PlaylistDao
+import com.example.song.data.dao.StreamingDao
 import com.example.song.data.model.Song
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.PlaylistSongCrossRef
+import com.example.song.data.model.StreamingItem
 
 @Database(
-    entities = [Song::class, Playlist::class, PlaylistSongCrossRef::class],
-    version = 4,
+    entities = [Song::class, Playlist::class, PlaylistSongCrossRef::class, StreamingItem::class],
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun songDao(): SongDao
     abstract fun playlistDao(): PlaylistDao
+    abstract fun streamingDao(): StreamingDao
 
     companion object {
         @Volatile
@@ -31,7 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "song_database"
                 )
-                .fallbackToDestructiveMigration() // Simple for now, wipes data on schema change
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance

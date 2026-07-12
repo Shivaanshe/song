@@ -22,7 +22,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    object Discover : Screen("discover", "Coming Soon", Icons.Default.MusicNote)
+    object Discover : Screen("discover", "Discover", Icons.Default.MusicNote)
     object Favorites : Screen("favorites", "Favorites", Icons.Default.Favorite)
     object Library : Screen("library", "Library", Icons.Default.CloudDownload)
 }

@@ -40,6 +40,7 @@ fun PlayerScreen(
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
+    val playbackError by viewModel.playbackError.collectAsState()
 
     var sliderPosition by remember { mutableStateOf<Float?>(null) }
 
@@ -107,13 +108,13 @@ fun PlayerScreen(
                 )
             }
         ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                 Spacer(modifier = Modifier.weight(0.15f))
 
                 // Album Art with Shadow and Glass Border
@@ -302,6 +303,27 @@ fun PlayerScreen(
                 }
 
                 Spacer(modifier = Modifier.weight(0.2f))
+                }
+
+                // Error Snackbar/Toast-like overlay
+                playbackError?.let { error ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 16.dp, end = 16.dp, bottom = 32.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Red.copy(alpha = 0.8f))
+                            .clickable { viewModel.clearPlaybackError() }
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = error,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             }
         }
     }

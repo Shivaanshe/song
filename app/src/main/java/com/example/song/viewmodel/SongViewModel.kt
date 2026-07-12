@@ -15,14 +15,17 @@ import androidx.media3.session.SessionToken
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
+import com.example.song.data.model.StreamingItem
 import com.example.song.data.repository.SongRepository
 import com.example.song.service.MusicService
+import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: SongRepository
@@ -61,6 +64,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
+    private val _topLevelStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
+    val topLevelStreamingItems: StateFlow<List<StreamingItem>> = _topLevelStreamingItems.asStateFlow()
+
+    private val _isExtracting = MutableStateFlow(false)
+    val isExtracting: StateFlow<Boolean> = _isExtracting.asStateFlow()
+
+    private val _resolvingUrlId = MutableStateFlow<Int?>(null)
+    val resolvingUrlId: StateFlow<Int?> = _resolvingUrlId.asStateFlow()
+
+    private val _playbackError = MutableStateFlow<String?>(null)
+    val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
     private var isUserSeeking = false
 
     val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
@@ -76,6 +91,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         repository = SongRepository(
             database.songDao(),
             database.playlistDao(),
+            database.streamingDao(),
             application.filesDir // Use filesDir for persistent storage
         )
 
@@ -99,11 +115,42 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.favoriteSongs.collect { _favoriteSongs.value = it }
         }
+        viewModelScope.launch {
+            repository.topLevelStreamingItems.collect { _topLevelStreamingItems.value = it }
+        }
+
+        /* viewModelScope.launch {
+            repository.scanAndRestoreSongs()
+        } */
+        
         initMediaController(application)
-        startProgressUpdate()
     }
 
-    private fun initMediaController(context: Context) {
+    fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
+        return repository.getItemsForStreamingPlaylist(playlistUrl)
+    }
+
+    fun addStreamingItem(url: String) {
+        viewModelScope.launch {
+            _isExtracting.value = true
+            try {
+                val items = YoutubeStreamHandler.getMetadata(url)
+                repository.insertStreamingItems(items)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isExtracting.value = false
+            }
+        }
+    }
+
+    fun deleteStreamingItem(item: StreamingItem) {
+        viewModelScope.launch {
+            repository.deleteStreamingItem(item)
+        }
+    }
+
+    fun initMediaController(context: Context) {
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener({
@@ -112,7 +159,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         mediaItem?.let { item ->
                             val songId = item.mediaId.toIntOrNull()
-                            _currentPlayingSong.value = _allSongs.value.find { it.id == songId }
+                            _currentPlayingSong.value = _allSongs.value.find { it.id == songId } ?: _currentQueue.value.find { it.id == songId }
                         }
                     }
 
@@ -133,7 +180,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
                             _duration.value = duration
+                            _playbackError.value = null
                         }
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        android.util.Log.e("SongViewModel", "Playback error: ${error.message}", error)
+                        _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                        _isPlaying.value = false
                     }
 
                     override fun onRepeatModeChanged(repeatMode: Int) {
@@ -145,9 +199,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 _isPlaying.value = isPlaying
                 _currentPlayingSong.value = currentMediaItem?.let { item ->
                     val songId = item.mediaId.toIntOrNull()
-                    _allSongs.value.find { it.id == songId }
+                    _allSongs.value.find { it.id == songId } ?: _currentQueue.value.find { it.id == songId }
                 }
             }
+            startProgressUpdate()
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -238,10 +293,68 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         mediaController?.apply {
             // Respect the current repeat mode when setting new media items
             val currentMode = repeatMode 
-            setMediaItems(queue.map { it.toMediaItem() }, index, 0L)
+            val items = queue.map { it.toMediaItem() }
+            setMediaItems(items, index, 0L)
             repeatMode = currentMode
             prepare()
             play()
+        }
+    }
+
+    private fun StreamingItem.toMediaItem(directUrl: String? = null): MediaItem {
+        val bundle = android.os.Bundle().apply {
+            putString("youtube_url", youtubeUrl)
+        }
+        return MediaItem.Builder()
+            .setMediaId(id.toString())
+            .setUri(directUrl ?: youtubeUrl) // Placeholder, Service will resolve this if it's the youtubeUrl
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist("YouTube")
+                    .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
+                    .setExtras(bundle)
+                    .build()
+            )
+            .build()
+    }
+
+    fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
+        viewModelScope.launch {
+            _resolvingUrlId.value = item.id
+            val directUrl = YoutubeStreamHandler.getDirectAudioUrl(item.youtubeUrl)
+            _resolvingUrlId.value = null
+            
+            if (directUrl == null) return@launch
+
+            val filteredQueue = queue.filter { !it.isPlaylist }
+            val mediaItems = filteredQueue.map { qItem ->
+                if (qItem.id == item.id) {
+                    qItem.toMediaItem(directUrl)
+                } else {
+                    qItem.toMediaItem()
+                }
+            }
+            val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+            
+            _currentQueue.value = filteredQueue.map {
+                Song(
+                    id = it.id,
+                    title = it.title,
+                    artist = "YouTube",
+                    audioUri = it.youtubeUrl,
+                    imageUrl = it.thumbnailUrl,
+                    duration = it.duration
+                )
+            }
+            
+            mediaController?.apply {
+                val currentMode = repeatMode
+                setMediaItems(mediaItems, index, 0L)
+                repeatMode = currentMode
+                prepare()
+                play()
+            }
         }
     }
 
@@ -336,9 +449,26 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
+        android.util.Log.d("SongViewModel", "togglePlayPause triggered. isPlaying: ${mediaController?.isPlaying}, state: ${mediaController?.playbackState}")
+        _playbackError.value = null
         mediaController?.let {
-            if (it.isPlaying) it.pause() else it.play()
+            when {
+                it.isPlaying -> it.pause()
+                it.playbackState == Player.STATE_IDLE -> {
+                    it.prepare()
+                    it.play()
+                }
+                it.playbackState == Player.STATE_ENDED -> {
+                    it.seekTo(0)
+                    it.play()
+                }
+                else -> it.play()
+            }
         }
+    }
+
+    fun clearPlaybackError() {
+        _playbackError.value = null
     }
 
     override fun onCleared() {

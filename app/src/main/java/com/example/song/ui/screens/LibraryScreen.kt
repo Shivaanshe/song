@@ -468,13 +468,13 @@ fun LibraryScreen(
 
 @Composable
 fun AddMenuOption(text: String, icon: ImageVector, onClick: () -> Unit) {
-    Box(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White.copy(alpha = 0.2f))
             .clickable { onClick() }
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(18.dp)),
+        color = Color.White.copy(alpha = 0.2f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),

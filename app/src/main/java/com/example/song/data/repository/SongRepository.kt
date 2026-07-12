@@ -1,5 +1,7 @@
 package com.example.song.data.repository
 
+import com.example.song.data.dao.StreamingDao
+import com.example.song.data.model.StreamingItem
 import com.example.song.data.api.ITunesService
 import com.example.song.data.dao.PlaylistDao
 import com.example.song.data.dao.SongDao
@@ -18,6 +20,7 @@ import java.io.File
 import java.net.URL
 import java.util.UUID
 import android.util.Log
+import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,6 +29,7 @@ import kotlinx.coroutines.launch
 class SongRepository(
     private val songDao: SongDao,
     private val playlistDao: PlaylistDao,
+    private val streamingDao: StreamingDao,
     private val baseDir: File
 ) {
     private val iTunesService: ITunesService by lazy {
@@ -42,6 +46,44 @@ class SongRepository(
     val allSongs: Flow<List<Song>> = songDao.getAllSongs()
     val allPlaylists: Flow<List<Playlist>> = playlistDao.getAllPlaylists()
     val favoriteSongs: Flow<List<Song>> = songDao.getFavoriteSongs()
+    val topLevelStreamingItems: Flow<List<StreamingItem>> = streamingDao.getAllTopLevelItems()
+
+    suspend fun scanAndRestoreSongs() = withContext(Dispatchers.IO) {
+        val folders = listOf(File(baseDir, "Music"), File(baseDir, "DownloadedMusic"))
+        val existingUris = songDao.getAllSongsSync().map { it.audioUri }.toSet()
+
+        folders.forEach { folder ->
+            if (folder.exists() && folder.isDirectory) {
+                folder.listFiles()?.forEach { file ->
+                    if (file.isFile && file.extension in listOf("mp3", "m4a", "wav", "ogg", "opus")) {
+                        if (!existingUris.contains(file.absolutePath)) {
+                            val song = Song(
+                                title = file.nameWithoutExtension.replace("_", " "),
+                                artist = "Local",
+                                audioUri = file.absolutePath
+                            )
+                            songDao.insertSong(song)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
+        return streamingDao.getItemsForPlaylist(playlistUrl)
+    }
+
+    suspend fun insertStreamingItems(items: List<StreamingItem>) {
+        streamingDao.insertItems(items)
+    }
+
+    suspend fun deleteStreamingItem(item: StreamingItem) {
+        if (item.isPlaylist) {
+            streamingDao.deletePlaylistItems(item.youtubeUrl)
+        }
+        streamingDao.deleteItem(item)
+    }
 
     suspend fun insertSong(song: Song) {
         val cleanTitle = song.title
@@ -69,6 +111,13 @@ class SongRepository(
     }
 
     suspend fun deleteSong(songId: Int) {
+        val song = songDao.getSongByIdSync(songId)
+        song?.let {
+            val file = File(it.audioUri)
+            if (file.exists()) {
+                file.delete()
+            }
+        }
         songDao.deleteSong(songId)
     }
 
@@ -104,7 +153,7 @@ class SongRepository(
         val requestId = UUID.randomUUID().toString()
         currentRequestId = requestId
         
-        val musicDir = File(baseDir, "Music")
+        val musicDir = File(baseDir, "DownloadedMusic")
         if (!musicDir.exists()) musicDir.mkdirs()
 
         try {

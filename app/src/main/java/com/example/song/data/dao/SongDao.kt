@@ -20,6 +20,12 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY id DESC")
     fun getAllSongs(): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs")
+    suspend fun getAllSongsSync(): List<Song>
+
+    @Query("SELECT * FROM songs WHERE id = :songId")
+    suspend fun getSongByIdSync(songId: Int): Song?
+
     @Query("SELECT * FROM songs WHERE isFavorite = 1")
     fun getFavoriteSongs(): Flow<List<Song>>
 
