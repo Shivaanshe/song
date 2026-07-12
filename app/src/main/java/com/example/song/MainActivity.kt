@@ -94,6 +94,10 @@ fun MainApp(viewModel: SongViewModel) {
         )
     )
 
+    // Screens where bottom bar should be visible
+    val mainScreens = listOf("library", "favorites", "discover")
+    val showBottomBar = currentDestination?.route in mainScreens
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -102,28 +106,45 @@ fun MainApp(viewModel: SongViewModel) {
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {
-                if (currentDestination?.route != "player") {
-                    NowPlayingBar(
-                        song = currentSong,
-                        isPlaying = isPlaying,
-                        onTogglePlay = { viewModel.togglePlayPause() },
-                        onClick = { navController.navigate("player") }
-                    )
+                Column {
+                    if (currentDestination?.route != "player" && currentSong != null) {
+                        NowPlayingBar(
+                            song = currentSong,
+                            isPlaying = isPlaying,
+                            onTogglePlay = { viewModel.togglePlayPause() },
+                            onClick = { navController.navigate("player") }
+                        )
+                    }
+                    if (showBottomBar) {
+                        com.example.song.ui.components.GlassNavigationBar(navController)
+                    }
                 }
             }
         ) { innerPadding ->
             NavHost(
                 navController = navController,
                 startDestination = "library",
-                modifier = Modifier.padding(if (currentDestination?.route == "player") PaddingValues() else innerPadding)
+                modifier = Modifier.padding(
+                    if (currentDestination?.route == "player") PaddingValues() 
+                    else innerPadding
+                )
             ) {
                 composable("library") {
                     LibraryScreen(
                         viewModel = viewModel,
                         onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
-                        onFavoritesClick = { navController.navigate("playlist/-1/Favorites") },
+                        onFavoritesClick = { navController.navigate("favorites") },
                         onSongClick = { navController.navigate("player") }
                     )
+                }
+                composable("favorites") {
+                    com.example.song.ui.screens.FavoritesScreen(
+                        viewModel = viewModel,
+                        onSongClick = { navController.navigate("player") }
+                    )
+                }
+                composable("discover") {
+                    com.example.song.ui.screens.DiscoverScreen()
                 }
                 composable(
                     "playlist/{playlistId}/{playlistName}",
