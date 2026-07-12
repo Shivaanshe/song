@@ -21,7 +21,7 @@ class SongApplication : Application() {
     private val _isReady = MutableStateFlow(false)
     val isReady = _isReady.asStateFlow()
 
-    @UnstableApi
+    @androidx.media3.common.util.UnstableApi
     lateinit var playerCache: SimpleCache
 
     companion object {
@@ -29,14 +29,14 @@ class SongApplication : Application() {
         fun getInstance(): SongApplication = instance
     }
 
-    @UnstableApi
+    @androidx.media3.common.util.UnstableApi
     private fun initPlayerCache() {
         val evictor = LeastRecentlyUsedCacheEvictor(300 * 1024 * 1024L) // 300MB
         val databaseProvider = StandaloneDatabaseProvider(this)
         playerCache = SimpleCache(File(cacheDir, "media_cache"), evictor, databaseProvider)
     }
 
-    @androidx.annotation.OptIn(UnstableApi::class)
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         instance = this
