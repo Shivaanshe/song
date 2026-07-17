@@ -36,7 +36,7 @@ class SongApplication : Application() {
         playerCache = SimpleCache(File(cacheDir, "media_cache"), evictor, databaseProvider)
     }
 
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    @androidx.media3.common.util.UnstableApi
     override fun onCreate() {
         super.onCreate()
         instance = this

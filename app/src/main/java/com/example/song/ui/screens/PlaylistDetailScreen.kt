@@ -52,7 +52,7 @@ fun PlaylistDetailScreen(
     }
     
     val repeatMode by viewModel.repeatMode.collectAsState()
-    var rotationAngle by remember { mutableStateOf(0f) }
+    var rotationAngle by remember { mutableFloatStateOf(0f) }
     val animatedRotation by animateFloatAsState(
         targetValue = rotationAngle,
         animationSpec = tween(durationMillis = 500, easing = LinearOutSlowInEasing),

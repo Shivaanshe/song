@@ -52,7 +52,7 @@ fun Modifier.multiSelectDragHandler(
                     val scrollThresholdDown = viewportHeight * 0.85f
                     var scrollAmount = 0f
 
-                    if (y < scrollThresholdUp && y >= 0) {
+                    if (y in 0f..scrollThresholdUp) {
                         val intensity = ((scrollThresholdUp - y) / scrollThresholdUp).coerceIn(0f, 1f)
                         scrollAmount = -(intensity * 40f) // Max 40px per 10ms
                     } else if (y > scrollThresholdDown && y <= viewportHeight) {
