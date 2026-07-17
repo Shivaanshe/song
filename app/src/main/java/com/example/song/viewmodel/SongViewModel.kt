@@ -337,6 +337,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
             val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
             
+            val streamingSong = Song(
+                id = item.id,
+                title = item.title,
+                artist = "YouTube",
+                audioUri = item.youtubeUrl,
+                imageUrl = item.thumbnailUrl,
+                duration = item.duration
+            )
+            _currentPlayingSong.value = streamingSong
+
             _currentQueue.value = filteredQueue.map {
                 Song(
                     id = it.id,

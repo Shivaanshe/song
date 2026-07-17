@@ -31,17 +31,38 @@ object YoutubeStreamHandler {
                     val type = json.optString("_type", "video")
                     
                     if (type == "playlist") {
+                        val playlistEntries = json.optJSONArray("entries")
+                        val firstEntryThumb = if (playlistEntries != null && playlistEntries.length() > 0) {
+                            val first = playlistEntries.getJSONObject(0)
+                            if (first.has("thumbnail")) {
+                                first.getString("thumbnail")
+                            } else if (first.has("thumbnails")) {
+                                val thumbs = first.getJSONArray("thumbnails")
+                                if (thumbs.length() > 0) thumbs.getJSONObject(0).getString("url") else null
+                            } else null
+                        } else null
+
                         playlistItem = StreamingItem(
                             youtubeUrl = json.optString("webpage_url", url),
                             title = json.optString("title", "Playlist"),
-                            thumbnailUrl = if (json.isNull("thumbnail")) null else json.getString("thumbnail"),
+                            thumbnailUrl = if (json.has("thumbnail")) {
+                                json.getString("thumbnail")
+                            } else if (json.has("thumbnails")) {
+                                val thumbnails = json.getJSONArray("thumbnails")
+                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else firstEntryThumb
+                            } else firstEntryThumb,
                             isPlaylist = true
                         )
                     } else {
                         val id = json.optString("id")
                         if (id.isNotEmpty()) {
                             val title = json.optString("title", "Unknown Title")
-                            val thumb = if (json.isNull("thumbnail")) null else json.getString("thumbnail")
+                            val thumb = if (json.has("thumbnail")) {
+                                json.getString("thumbnail")
+                            } else if (json.has("thumbnails")) {
+                                val thumbnails = json.getJSONArray("thumbnails")
+                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
+                            } else null
                             val duration = json.optLong("duration", 0L)
                             
                             items.add(StreamingItem(
@@ -49,6 +70,7 @@ object YoutubeStreamHandler {
                                 title = title,
                                 thumbnailUrl = thumb,
                                 isPlaylist = false,
+                                parentPlaylistUrl = playlistItem?.youtubeUrl,
                                 duration = duration * 1000L
                             ))
                         }
@@ -59,7 +81,9 @@ object YoutubeStreamHandler {
             }
             
             val result = mutableListOf<StreamingItem>()
-            playlistItem?.let { result.add(it) }
+            if (playlistItem != null && items.size > 1) {
+                result.add(playlistItem)
+            }
             result.addAll(items)
             
             if (result.isEmpty() && lines.isNotEmpty()) {
@@ -68,10 +92,17 @@ object YoutubeStreamHandler {
                     val json = JSONObject(lines[0])
                     val id = json.optString("id")
                     if (id.isNotEmpty()) {
+                        val thumb = if (json.has("thumbnail")) {
+                            json.getString("thumbnail")
+                        } else if (json.has("thumbnails")) {
+                            val thumbnails = json.getJSONArray("thumbnails")
+                            if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
+                        } else null
+                        
                         result.add(StreamingItem(
                             youtubeUrl = json.optString("webpage_url", url),
                             title = json.optString("title", "Unknown Title"),
-                            thumbnailUrl = if (json.isNull("thumbnail")) null else json.getString("thumbnail"),
+                            thumbnailUrl = thumb,
                             isPlaylist = false,
                             duration = json.optLong("duration", 0L) * 1000L
                         ))

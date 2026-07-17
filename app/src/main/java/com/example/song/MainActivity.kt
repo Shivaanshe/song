@@ -146,7 +146,10 @@ fun MainApp(viewModel: SongViewModel) {
                     )
                 }
                 composable("discover") {
-                    com.example.song.ui.screens.DiscoverScreen(viewModel = viewModel)
+                    com.example.song.ui.screens.DiscoverScreen(
+                        viewModel = viewModel,
+                        onSongClick = { navController.navigate("player") }
+                    )
                 }
                 composable(
                     "playlist/{playlistId}/{playlistName}",

@@ -6,9 +6,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -38,11 +42,16 @@ import com.example.song.viewmodel.SongViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun DiscoverScreen(viewModel: SongViewModel) {
+fun DiscoverScreen(
+    viewModel: SongViewModel,
+    onSongClick: () -> Unit
+) {
     val items by viewModel.topLevelStreamingItems.collectAsState()
     val isExtracting by viewModel.isExtracting.collectAsState()
     val isEngineReady by SongApplication.getInstance().isReady.collectAsState()
     val resolvingUrlId by viewModel.resolvingUrlId.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val currentPlayingSong by viewModel.currentPlayingSong.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -70,6 +79,15 @@ fun DiscoverScreen(viewModel: SongViewModel) {
     val filteredItems = remember(items, searchQuery) {
         if (searchQuery.isBlank()) items
         else items.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    }
+
+    val playlists = remember(filteredItems) { filteredItems.filter { it.isPlaylist } }
+    val singleSongs = remember(filteredItems) { 
+        // Logic: Show items that are not playlists OR are individual songs from playlists
+        // but only if they are not explicitly marked as part of the "Recommended" (top-level) list
+        // Actually, the user wants playlist songs in Recommended too if they are "more than one".
+        // Let's just show all non-playlist items in Recommended for now to ensure visibility.
+        filteredItems.filter { !it.isPlaylist } 
     }
 
     Box(
@@ -115,7 +133,7 @@ fun DiscoverScreen(viewModel: SongViewModel) {
                                 selectedPlaylist?.title ?: "Discover",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF333333)
+                                    color = Color(0xFF424242)
                                 )
                             )
                         }
@@ -125,9 +143,15 @@ fun DiscoverScreen(viewModel: SongViewModel) {
                             if (selectedPlaylist != null) {
                                 IconButton(
                                     onClick = { selectedPlaylist = null },
-                                    modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .background(Color.White.copy(alpha = 0.3f), CircleShape)
                                 ) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF424242))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color(0xFF424242)
+                                    )
                                 }
                             } else {
                                 IconButton(
@@ -182,31 +206,71 @@ fun DiscoverScreen(viewModel: SongViewModel) {
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 80.dp),
                     ) {
-                        item {
-                            Text(
-                                "Streaming Content",
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF424242)
-                                )
-                            )
-                        }
-                        items(filteredItems) { item ->
-                            StreamingItemCard(
-                                item = item,
-                                enabled = isEngineReady,
-                                isResolving = resolvingUrlId == item.id,
-                                onClick = {
-                                    if (isEngineReady) {
-                                        if (item.isPlaylist) {
-                                            selectedPlaylist = item
-                                        } else {
-                                            viewModel.playStreamingItem(item, filteredItems)
+                        if (playlists.isNotEmpty()) {
+                            item {
+                                Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                                    Text(
+                                        "Collections",
+                                        modifier = Modifier.padding(horizontal = 24.dp),
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF424242)
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 24.dp)
+                                    ) {
+                                        items(playlists) { playlist ->
+                                            StreamingPlaylistCard(playlist) { 
+                                                selectedPlaylist = playlist 
+                                            }
                                         }
                                     }
                                 }
-                            )
+                            }
+                        }
+
+                        if (singleSongs.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "Recommended",
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF424242)
+                                    )
+                                )
+                            }
+                            items(singleSongs) { item ->
+                                val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
+                                StreamingItemCard(
+                                    item = item,
+                                    enabled = isEngineReady,
+                                    isResolving = resolvingUrlId == item.id,
+                                    isPlaying = isPlaying && isCurrentItemPlaying,
+                                    onClick = {
+                                        if (isEngineReady) {
+                                            if (isCurrentItemPlaying) {
+                                                viewModel.togglePlayPause()
+                                            } else {
+                                                viewModel.playStreamingItem(item, singleSongs)
+                                                onSongClick()
+                                            }
+                                        }
+                                    },
+                                    onDelete = {
+                                        viewModel.deleteStreamingItem(item)
+                                    }
+                                )
+                            }
+                        } else if (playlists.isEmpty() && !isExtracting) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) {
+                                    Text("No items found", color = Color.Gray)
+                                }
+                            }
                         }
                     }
                 } else {
@@ -226,14 +290,24 @@ fun DiscoverScreen(viewModel: SongViewModel) {
                             )
                         }
                         items(playlistItems) { item ->
+                            val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
                             StreamingItemCard(
                                 item = item,
                                 enabled = isEngineReady,
                                 isResolving = resolvingUrlId == item.id,
+                                isPlaying = isPlaying && isCurrentItemPlaying,
                                 onClick = {
                                     if (isEngineReady) {
-                                        viewModel.playStreamingItem(item, playlistItems)
+                                        if (isCurrentItemPlaying) {
+                                            viewModel.togglePlayPause()
+                                        } else {
+                                            viewModel.playStreamingItem(item, playlistItems)
+                                            onSongClick()
+                                        }
                                     }
+                                },
+                                onDelete = {
+                                    viewModel.deleteStreamingItem(item)
                                 }
                             )
                         }
@@ -304,7 +378,7 @@ fun DiscoverScreen(viewModel: SongViewModel) {
                                 text = "Add from YouTube",
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF333333)
+                                    color = Color(0xFF424242)
                                 )
                             )
                         }
@@ -408,18 +482,28 @@ fun DiscoverScreen(viewModel: SongViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StreamingItemCard(
     item: StreamingItem, 
     enabled: Boolean = true, 
     isResolving: Boolean = false,
-    onClick: () -> Unit
+    isPlaying: Boolean = false,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .clickable(enabled = enabled && !isResolving) { onClick() },
+            .combinedClickable(
+                enabled = enabled && !isResolving,
+                onClick = onClick,
+                onLongClick = { showDeleteDialog = true }
+            )
+            .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)),
         color = Color.White.copy(alpha = 0.3f),
         shape = RoundedCornerShape(20.dp)
     ) {
@@ -442,6 +526,17 @@ fun StreamingItemCard(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.MusicNote, 
+                            contentDescription = null, 
+                            tint = Color.White.copy(alpha = 0.5f)
+                        )
+                    }
                 }
                 if (item.isPlaylist) {
                     Box(
@@ -460,14 +555,18 @@ fun StreamingItemCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF424242)
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = if (item.isPlaylist) "YouTube Playlist" else "YouTube Stream",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.DarkGray
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFF666666)
+                    )
                 )
             }
             
@@ -485,8 +584,11 @@ fun StreamingItemCard(
                         enabled = enabled
                     ) {
                         Icon(
-                            imageVector = if (item.isPlaylist) Icons.Default.FolderOpen else Icons.Default.PlayArrow,
-                            contentDescription = "Play",
+                            imageVector = when {
+                                isPlaying -> Icons.Default.Pause
+                                else -> Icons.Default.PlayArrow
+                            },
+                            contentDescription = if (isPlaying) "Pause" else "Play",
                             tint = Color(0xFF424242),
                             modifier = Modifier.size(20.dp)
                         )
@@ -494,6 +596,110 @@ fun StreamingItemCard(
                 }
             }
         }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Stream") },
+            text = { Text("Are you sure you want to remove '${item.title}' from your Discover list?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete()
+                    showDeleteDialog = false
+                }) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun StreamingPlaylistCard(item: StreamingItem, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .shadow(12.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color(0xFFF06292), Color(0xFFBA68C8))
+                    )
+                )
+                .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (!item.thumbnailUrl.isNullOrEmpty()) {
+                AsyncImage(
+                    model = item.thumbnailUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                // Overlay a small playlist icon in the corner
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.PlaylistPlay,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
+                    )
+                }
+            } else {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(56.dp),
+                    tint = Color.White.copy(alpha = 0.5f)
+                )
+                // Overlay a small playlist icon in the corner even if no thumb
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.PlaylistPlay,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF424242)
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "YouTube Playlist",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF666666)
+        )
     }
 }
 
