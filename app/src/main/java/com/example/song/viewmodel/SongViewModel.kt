@@ -269,6 +269,60 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _selectionRange = MutableStateFlow<SelectionRange?>(null)
+
+    data class SelectionRange(
+        val startId: Int,
+        val initialSelectedIds: Set<Int>,
+        val isAdding: Boolean
+    )
+
+    fun startRangeSelection(songId: Int, allItems: List<Int>, isStreaming: Boolean = false) {
+        val currentSelected = if (isStreaming) _selectedStreamingIds.value else _selectedSongIds.value
+        val isAdding = !currentSelected.contains(songId)
+        
+        _selectionRange.value = SelectionRange(songId, currentSelected, isAdding)
+        _isSelectionMode.value = true
+        
+        // Initial state update
+        updateRangeSelection(songId, allItems, isStreaming)
+    }
+
+    fun updateRangeSelection(currentId: Int, allItems: List<Int>, isStreaming: Boolean = false) {
+        val range = _selectionRange.value ?: return
+
+        if (allItems.isEmpty()) return
+
+        val startIndex = allItems.indexOf(range.startId)
+        val currentIndex = allItems.indexOf(currentId)
+
+        if (startIndex == -1 || currentIndex == -1) return
+
+        val fromIndex = minOf(startIndex, currentIndex)
+        val toIndex = maxOf(startIndex, currentIndex)
+        val rangeIds = allItems.subList(fromIndex, toIndex + 1).toSet()
+
+        if (isStreaming) {
+            val newSelection = if (range.isAdding) {
+                range.initialSelectedIds + rangeIds
+            } else {
+                range.initialSelectedIds - rangeIds
+            }
+            _selectedStreamingIds.value = newSelection
+        } else {
+            val newSelection = if (range.isAdding) {
+                range.initialSelectedIds + rangeIds
+            } else {
+                range.initialSelectedIds - rangeIds
+            }
+            _selectedSongIds.value = newSelection
+        }
+    }
+
+    fun endRangeSelection() {
+        _selectionRange.value = null
+    }
+
     fun toggleSelectionMode(enabled: Boolean) {
         _isSelectionMode.value = enabled
         if (!enabled) {

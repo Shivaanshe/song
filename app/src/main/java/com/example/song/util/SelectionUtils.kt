@@ -19,19 +19,21 @@ import kotlinx.coroutines.withTimeoutOrNull
  * A highly robust multi-selection drag handler that works with high-refresh rate screens.
  * It uses the Initial pass to intercept gestures before child components (like clickables)
  * can consume them, ensuring "sticky" selection during rapid movement.
+ * 
+ * This version supports "Gallery-style" selection by providing start and update callbacks
+ * that allow the caller to implement range-based selection with "undo" when dragging back.
  */
 fun Modifier.multiSelectDragHandler(
     listState: LazyListState,
-    isSelectionMode: Boolean,
-    onSelect: (Any) -> Unit,
-    onDragStart: () -> Unit = {},
+    onDragStart: (Any) -> Unit,
+    onDragUpdate: (Any) -> Unit,
     onDragEnd: () -> Unit = {}
 ): Modifier = composed {
     val haptics = LocalHapticFeedback.current
     val viewConfiguration = LocalViewConfiguration.current
     
-    val currentOnSelect by rememberUpdatedState(onSelect)
     val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragUpdate by rememberUpdatedState(onDragUpdate)
     val currentOnDragEnd by rememberUpdatedState(onDragEnd)
     
     // Track current finger position for the auto-scroll loop
@@ -65,7 +67,7 @@ fun Modifier.multiSelectDragHandler(
                         val info = listState.layoutInfo
                         info.visibleItemsInfo.find { 
                             y.toInt() in it.offset..(it.offset + it.size)
-                        }?.let { currentOnSelect(it.key) }
+                        }?.let { currentOnDragUpdate(it.key) }
                     }
                 }
             }
@@ -100,46 +102,48 @@ fun Modifier.multiSelectDragHandler(
             // 3. If the timer expired (longPressTriggered is null), start selection mode
             if (longPressTriggered == null) {
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                currentOnDragStart()
-                dragInProgress = true
                 
-                // Initial selection of the item under the finger
-                listState.layoutInfo.visibleItemsInfo.find { 
+                // Find initial item to start selection
+                val initialItem = listState.layoutInfo.visibleItemsInfo.find { 
                     down.position.y.toInt() in it.offset..(it.offset + it.size)
-                }?.let { currentOnSelect(it.key) }
-
-                // 4. Drag Selection Loop: Intercept and consume all subsequent pointer moves
-                val pointerId = down.id
-                while (dragInProgress) {
-                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
-                    val change = event.changes.find { it.id == pointerId } ?: break
-                    
-                    // IMPORTANT: Consume the event so the LazyColumn and children don't respond to it
-                    change.consume()
-                    
-                    if (change.changedToUp()) {
-                        dragInProgress = false
-                        break
-                    }
-
-                    val currentY = change.position.y
-                    dragYState.floatValue = currentY
-                    
-                    // Hit detection: Find the item under the current finger position
-                    // We use a small 10px buffer to make selection feel more responsive
-                    val info = listState.layoutInfo
-                    val itemUnderFinger = info.visibleItemsInfo.find { 
-                        currentY.toInt() in (it.offset - 10)..(it.offset + it.size + 10)
-                    }
-                    
-                    if (itemUnderFinger != null) {
-                        currentOnSelect(itemUnderFinger.key)
-                    }
                 }
-                
-                // Reset drag state
-                dragYState.floatValue = -1f
-                currentOnDragEnd()
+
+                if (initialItem != null) {
+                    currentOnDragStart(initialItem.key)
+                    dragInProgress = true
+
+                    // 4. Drag Selection Loop: Intercept and consume all subsequent pointer moves
+                    val pointerId = down.id
+                    while (dragInProgress) {
+                        val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                        val change = event.changes.find { it.id == pointerId } ?: break
+                        
+                        // IMPORTANT: Consume the event so the LazyColumn and children don't respond to it
+                        change.consume()
+                        
+                        if (change.changedToUp()) {
+                            dragInProgress = false
+                            break
+                        }
+
+                        val currentY = change.position.y
+                        dragYState.floatValue = currentY
+                        
+                        // Hit detection: Find the item under the current finger position
+                        val info = listState.layoutInfo
+                        val itemUnderFinger = info.visibleItemsInfo.find { 
+                            currentY.toInt() in (it.offset)..(it.offset + it.size)
+                        }
+                        
+                        if (itemUnderFinger != null) {
+                            currentOnDragUpdate(itemUnderFinger.key)
+                        }
+                    }
+                    
+                    // Reset drag state
+                    dragYState.floatValue = -1f
+                    currentOnDragEnd()
+                }
             }
         }
     }

@@ -242,14 +242,18 @@ fun LibraryScreen(
                     .padding(padding)
                     .multiSelectDragHandler(
                         listState = listState,
-                        isSelectionMode = isSelectionMode,
-                        onSelect = { key ->
+                        onDragStart = { key ->
                             if (key is Int) {
-                                viewModel.selectSong(key)
+                                viewModel.startRangeSelection(key, songs.map { it.id })
                             }
                         },
-                        onDragStart = {
-                            viewModel.toggleSelectionMode(true)
+                        onDragUpdate = { key ->
+                            if (key is Int) {
+                                viewModel.updateRangeSelection(key, songs.map { it.id })
+                            }
+                        },
+                        onDragEnd = {
+                            viewModel.endRangeSelection()
                         }
                     ),
                 contentPadding = PaddingValues(bottom = 80.dp)

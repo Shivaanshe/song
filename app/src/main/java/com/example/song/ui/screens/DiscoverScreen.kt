@@ -262,14 +262,18 @@ fun DiscoverScreen(
                             .fillMaxSize()
                             .multiSelectDragHandler(
                                 listState = listState,
-                                isSelectionMode = isSelectionMode,
-                                onSelect = { key ->
+                                onDragStart = { key ->
                                     if (key is Int) {
-                                        viewModel.selectStreamingItem(key)
+                                        viewModel.startRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
                                     }
                                 },
-                                onDragStart = {
-                                    viewModel.toggleSelectionMode(true)
+                                onDragUpdate = { key ->
+                                    if (key is Int) {
+                                        viewModel.updateRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
+                                    }
+                                },
+                                onDragEnd = {
+                                    viewModel.endRangeSelection()
                                 }
                             ),
                         contentPadding = PaddingValues(bottom = 80.dp),
@@ -357,14 +361,18 @@ fun DiscoverScreen(
                             .fillMaxSize()
                             .multiSelectDragHandler(
                                 listState = listState,
-                                isSelectionMode = isSelectionMode,
-                                onSelect = { key ->
+                                onDragStart = { key ->
                                     if (key is Int) {
-                                        viewModel.selectStreamingItem(key)
+                                        viewModel.startRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
                                     }
                                 },
-                                onDragStart = {
-                                    viewModel.toggleSelectionMode(true)
+                                onDragUpdate = { key ->
+                                    if (key is Int) {
+                                        viewModel.updateRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
+                                    }
+                                },
+                                onDragEnd = {
+                                    viewModel.endRangeSelection()
                                 }
                             ),
                         contentPadding = PaddingValues(bottom = 80.dp),
