@@ -76,6 +76,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _playbackError = MutableStateFlow<String?>(null)
     val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
 
+    private val _isSelectionMode = MutableStateFlow(false)
+    val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
+
+    private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
+    val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
+
+    private val _selectedStreamingIds = MutableStateFlow<Set<Int>>(emptySet())
+    val selectedStreamingIds: StateFlow<Set<Int>> = _selectedStreamingIds.asStateFlow()
+
     private var isUserSeeking = false
 
     val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
@@ -257,6 +266,83 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 mediaController?.stop()
                 _currentPlayingSong.value = null
             }
+        }
+    }
+
+    fun toggleSelectionMode(enabled: Boolean) {
+        _isSelectionMode.value = enabled
+        if (!enabled) {
+            _selectedSongIds.value = emptySet()
+            _selectedStreamingIds.value = emptySet()
+        }
+    }
+
+    fun toggleSongSelection(songId: Int) {
+        val current = _selectedSongIds.value.toMutableSet()
+        if (current.contains(songId)) {
+            current.remove(songId)
+        } else {
+            current.add(songId)
+        }
+        _selectedSongIds.value = current
+        if (current.isEmpty() && _selectedStreamingIds.value.isEmpty()) {
+            _isSelectionMode.value = false
+        } else {
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun toggleStreamingSelection(itemId: Int) {
+        val current = _selectedStreamingIds.value.toMutableSet()
+        if (current.contains(itemId)) {
+            current.remove(itemId)
+        } else {
+            current.add(itemId)
+        }
+        _selectedStreamingIds.value = current
+        if (current.isEmpty() && _selectedSongIds.value.isEmpty()) {
+            _isSelectionMode.value = false
+        } else {
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun selectSong(songId: Int) {
+        val current = _selectedSongIds.value.toMutableSet()
+        if (current.add(songId)) {
+            _selectedSongIds.value = current
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun selectStreamingItem(itemId: Int) {
+        val current = _selectedStreamingIds.value.toMutableSet()
+        if (current.add(itemId)) {
+            _selectedStreamingIds.value = current
+            _isSelectionMode.value = true
+        }
+    }
+
+    fun deleteSelectedItems() {
+        viewModelScope.launch {
+            val songIds = _selectedSongIds.value.toList()
+            val streamingIds = _selectedStreamingIds.value.toList()
+
+            songIds.forEach { id ->
+                repository.deleteSong(id)
+                if (_currentPlayingSong.value?.id == id) {
+                    mediaController?.stop()
+                    _currentPlayingSong.value = null
+                }
+            }
+
+            streamingIds.forEach { id ->
+                _topLevelStreamingItems.value.find { it.id == id }?.let { item ->
+                    repository.deleteStreamingItem(item)
+                }
+            }
+
+            toggleSelectionMode(false)
         }
     }
 

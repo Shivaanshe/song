@@ -1,16 +1,16 @@
 package com.example.song.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +30,10 @@ fun SongListItem(
     song: Song,
     onPlayClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isSelected: Boolean = false,
+    onLongClick: () -> Unit = {},
+    selectionMode: Boolean = false
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -38,12 +41,20 @@ fun SongListItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .combinedClickable(
-                onClick = onPlayClick,
-                onLongClick = { showDeleteDialog = true }
+            .clickable(
+                onClick = {
+                    if (selectionMode) onLongClick()
+                    else onPlayClick()
+                }
+            )
+            .border(
+                if (isSelected) 2.dp else 0.dp,
+                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                RoundedCornerShape(20.dp)
             ),
-        color = Color.White.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(20.dp)
+        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(20.dp),
+        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
     ) {
         Row(
             modifier = Modifier
@@ -51,14 +62,32 @@ fun SongListItem(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = song.imageUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-                contentScale = ContentScale.Crop
-            )
+            Box {
+                AsyncImage(
+                    model = song.imageUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+            }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

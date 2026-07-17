@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -35,13 +36,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import coil.compose.AsyncImage
 import com.example.song.SongApplication
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
+import com.example.song.util.multiSelectDragHandler
 import com.example.song.viewmodel.DownloadState
 import com.example.song.viewmodel.SongViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,6 +116,14 @@ fun LibraryScreen(
         )
     )
 
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val selectedSongIds by viewModel.selectedSongIds.collectAsState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    
+    // Auto-scroll logic handled by multiSelectDragHandler
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -112,83 +131,127 @@ fun LibraryScreen(
     ) {
         Scaffold(
             containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                CenterAlignedTopAppBar(
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    title = {
-                        if (isSearching) {
-                            TextField(
-                                value = searchQuery,
-                                onValueChange = { viewModel.setSearchQuery(it) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                placeholder = { Text("Search songs...") },
-                                singleLine = true,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.White.copy(alpha = 0.2f),
-                                    unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(24.dp),
-                                trailingIcon = {
-                                    IconButton(onClick = { 
-                                        isSearching = false
-                                        viewModel.setSearchQuery("")
-                                    }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close search")
-                                    }
-                                }
-                            )
-                        } else {
+                if (isSelectionMode) {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.White.copy(alpha = 0.4f)
+                        ),
+                        title = {
                             Text(
-                                "My Library",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF333333)
-                                )
+                                "${selectedSongIds.size} Selected",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                             )
-                        }
-                    },
-                    navigationIcon = {
-                        if (!isSearching) {
-                            IconButton(
-                                onClick = { isSearching = true },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                            ) {
-                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { 
+                                val count = selectedSongIds.size
+                                viewModel.deleteSelectedItems() 
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Deleted $count items")
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
                             }
                         }
-                    },
-                    actions = {
-                        if (!isSearching) {
-                            IconButton(
-                                onClick = { showAddMenu = !showAddMenu },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Add Options",
-                                    tint = Color(0xFF424242),
+                    )
+                } else {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        title = {
+                            if (isSearching) {
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { viewModel.setSearchQuery(it) },
                                     modifier = Modifier
-                                        .size(28.dp)
-                                        .rotate(addIconRotation)
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    placeholder = { Text("Search songs...") },
+                                    singleLine = true,
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.White.copy(alpha = 0.2f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent
+                                    ),
+                                    shape = RoundedCornerShape(24.dp),
+                                    trailingIcon = {
+                                        IconButton(onClick = { 
+                                            isSearching = false
+                                            viewModel.setSearchQuery("")
+                                        }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Close search")
+                                        }
+                                    }
+                                )
+                            } else {
+                                Text(
+                                    "My Library",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF333333)
+                                    )
                                 )
                             }
+                        },
+                        navigationIcon = {
+                            if (!isSearching) {
+                                IconButton(
+                                    onClick = { isSearching = true },
+                                    modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
+                                }
+                            }
+                        },
+                        actions = {
+                            if (!isSearching) {
+                                IconButton(
+                                    onClick = { showAddMenu = !showAddMenu },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add Options",
+                                        tint = Color(0xFF424242),
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .rotate(addIconRotation)
+                                    )
+                                }
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         ) { padding ->
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    .multiSelectDragHandler(
+                        listState = listState,
+                        isSelectionMode = isSelectionMode,
+                        onSelect = { key ->
+                            if (key is Int) {
+                                viewModel.selectSong(key)
+                            }
+                        },
+                        onDragStart = {
+                            viewModel.toggleSelectionMode(true)
+                        }
+                    ),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 if (!isSearching) {
@@ -233,19 +296,29 @@ fun LibraryScreen(
                     }
                 }
 
-                items(songs) { song ->
+                items(songs, key = { it.id }) { song ->
                     SongListItem(
                         song = song,
                         onPlayClick = {
-                            viewModel.playSong(song, songs)
-                            onSongClick()
+                            if (isSelectionMode) {
+                                viewModel.toggleSongSelection(song.id)
+                            } else {
+                                viewModel.playSong(song, songs)
+                                onSongClick()
+                            }
                         },
                         onFavoriteToggle = {
                             viewModel.updateFavorite(song, !song.isFavorite)
                         },
                         onDelete = {
                             viewModel.deleteSong(song.id)
-                        }
+                        },
+                        isSelected = selectedSongIds.contains(song.id),
+                        onLongClick = {
+                            viewModel.toggleSelectionMode(true)
+                            viewModel.toggleSongSelection(song.id)
+                        },
+                        selectionMode = isSelectionMode
                     )
                 }
             }

@@ -1,12 +1,15 @@
 package com.example.song.ui.screens
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -32,12 +35,24 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.example.song.SongApplication
 import com.example.song.data.model.StreamingItem
+import com.example.song.util.multiSelectDragHandler
 import com.example.song.viewmodel.SongViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -90,6 +105,14 @@ fun DiscoverScreen(
         filteredItems.filter { !it.isPlaylist } 
     }
 
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val selectedStreamingIds by viewModel.selectedStreamingIds.collectAsState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    
+    // Auto-scroll logic handled by multiSelectDragHandler
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -97,96 +120,127 @@ fun DiscoverScreen(
     ) {
         Scaffold(
             containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                CenterAlignedTopAppBar(
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    title = {
-                        if (isSearching) {
-                            TextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                placeholder = { Text("Search streaming...") },
-                                singleLine = true,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.White.copy(alpha = 0.2f),
-                                    unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent
-                                ),
-                                shape = RoundedCornerShape(24.dp),
-                                trailingIcon = {
-                                    IconButton(onClick = { 
-                                        isSearching = false
-                                        searchQuery = ""
-                                    }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close search")
+                if (isSelectionMode) {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.White.copy(alpha = 0.4f)
+                        ),
+                        title = {
+                            Text(
+                                "${selectedStreamingIds.size} Selected",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { 
+                                val count = selectedStreamingIds.size
+                                viewModel.deleteSelectedItems() 
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Deleted $count items")
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
+                            }
+                        }
+                    )
+                } else {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        title = {
+                            if (isSearching) {
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    placeholder = { Text("Search streaming...") },
+                                    singleLine = true,
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.White.copy(alpha = 0.2f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent
+                                    ),
+                                    shape = RoundedCornerShape(24.dp),
+                                    trailingIcon = {
+                                        IconButton(onClick = { 
+                                            isSearching = false
+                                            searchQuery = ""
+                                        }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Close search")
+                                        }
+                                    }
+                                )
+                            } else {
+                                Text(
+                                    selectedPlaylist?.title ?: "Discover",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF424242)
+                                    )
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            if (!isSearching) {
+                                if (selectedPlaylist != null) {
+                                    IconButton(
+                                        onClick = { selectedPlaylist = null },
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = Color(0xFF424242)
+                                        )
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = { isSearching = true },
+                                        modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                    ) {
+                                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
                                     }
                                 }
-                            )
-                        } else {
-                            Text(
-                                selectedPlaylist?.title ?: "Discover",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF424242)
-                                )
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        if (!isSearching) {
-                            if (selectedPlaylist != null) {
+                            }
+                        },
+                        actions = {
+                            if (!isSearching && selectedPlaylist == null) {
                                 IconButton(
-                                    onClick = { selectedPlaylist = null },
+                                    onClick = { if (isEngineReady) showAddMenu = !showAddMenu },
                                     modifier = Modifier
-                                        .padding(8.dp)
-                                        .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                        .size(48.dp)
+                                        .background(
+                                            if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f),
+                                            CircleShape
+                                        ),
+                                    enabled = isEngineReady
                                 ) {
                                     Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = Color(0xFF424242)
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add Options",
+                                        tint = Color(0xFF424242),
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .rotate(addIconRotation)
                                     )
                                 }
-                            } else {
-                                IconButton(
-                                    onClick = { isSearching = true },
-                                    modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
-                                }
                             }
                         }
-                    },
-                    actions = {
-                        if (!isSearching && selectedPlaylist == null) {
-                            IconButton(
-                                onClick = { if (isEngineReady) showAddMenu = !showAddMenu },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(
-                                        if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f),
-                                        CircleShape
-                                    ),
-                                enabled = isEngineReady
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Add Options",
-                                    tint = Color(0xFF424242),
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .rotate(addIconRotation)
-                                )
-                            }
-                        }
-                    }
-                )
+                    )
+                }
             }
         ) { padding ->
             Column(
@@ -203,7 +257,21 @@ fun DiscoverScreen(
 
                 if (selectedPlaylist == null) {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .multiSelectDragHandler(
+                                listState = listState,
+                                isSelectionMode = isSelectionMode,
+                                onSelect = { key ->
+                                    if (key is Int) {
+                                        viewModel.selectStreamingItem(key)
+                                    }
+                                },
+                                onDragStart = {
+                                    viewModel.toggleSelectionMode(true)
+                                }
+                            ),
                         contentPadding = PaddingValues(bottom = 80.dp),
                     ) {
                         if (playlists.isNotEmpty()) {
@@ -243,7 +311,7 @@ fun DiscoverScreen(
                                     )
                                 )
                             }
-                            items(singleSongs) { item ->
+                            items(singleSongs, key = { it.id }) { item ->
                                 val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
                                 StreamingItemCard(
                                     item = item,
@@ -251,7 +319,9 @@ fun DiscoverScreen(
                                     isResolving = resolvingUrlId == item.id,
                                     isPlaying = isPlaying && isCurrentItemPlaying,
                                     onClick = {
-                                        if (isEngineReady) {
+                                        if (isSelectionMode) {
+                                            viewModel.toggleStreamingSelection(item.id)
+                                        } else if (isEngineReady) {
                                             if (isCurrentItemPlaying) {
                                                 viewModel.togglePlayPause()
                                             } else {
@@ -262,7 +332,13 @@ fun DiscoverScreen(
                                     },
                                     onDelete = {
                                         viewModel.deleteStreamingItem(item)
-                                    }
+                                    },
+                                    isSelected = selectedStreamingIds.contains(item.id),
+                                    onLongClick = {
+                                        viewModel.toggleSelectionMode(true)
+                                        viewModel.toggleStreamingSelection(item.id)
+                                    },
+                                    selectionMode = isSelectionMode
                                 )
                             }
                         } else if (playlists.isEmpty() && !isExtracting) {
@@ -276,7 +352,21 @@ fun DiscoverScreen(
                 } else {
                     val playlistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist!!.youtubeUrl).collectAsState(initial = emptyList())
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .multiSelectDragHandler(
+                                listState = listState,
+                                isSelectionMode = isSelectionMode,
+                                onSelect = { key ->
+                                    if (key is Int) {
+                                        viewModel.selectStreamingItem(key)
+                                    }
+                                },
+                                onDragStart = {
+                                    viewModel.toggleSelectionMode(true)
+                                }
+                            ),
                         contentPadding = PaddingValues(bottom = 80.dp),
                     ) {
                         item {
@@ -289,7 +379,7 @@ fun DiscoverScreen(
                                 )
                             )
                         }
-                        items(playlistItems) { item ->
+                        items(playlistItems, key = { it.id }) { item ->
                             val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
                             StreamingItemCard(
                                 item = item,
@@ -297,7 +387,9 @@ fun DiscoverScreen(
                                 isResolving = resolvingUrlId == item.id,
                                 isPlaying = isPlaying && isCurrentItemPlaying,
                                 onClick = {
-                                    if (isEngineReady) {
+                                    if (isSelectionMode) {
+                                        viewModel.toggleStreamingSelection(item.id)
+                                    } else if (isEngineReady) {
                                         if (isCurrentItemPlaying) {
                                             viewModel.togglePlayPause()
                                         } else {
@@ -308,7 +400,12 @@ fun DiscoverScreen(
                                 },
                                 onDelete = {
                                     viewModel.deleteStreamingItem(item)
-                                }
+                                },
+                                isSelected = selectedStreamingIds.contains(item.id),
+                                onLongClick = {
+                                    viewModel.toggleStreamingSelection(item.id)
+                                },
+                                selectionMode = isSelectionMode
                             )
                         }
                     }
@@ -490,7 +587,10 @@ fun StreamingItemCard(
     isResolving: Boolean = false,
     isPlaying: Boolean = false,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isSelected: Boolean = false,
+    onLongClick: () -> Unit = {},
+    selectionMode: Boolean = false
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -498,13 +598,16 @@ fun StreamingItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .combinedClickable(
+            .clickable(
                 enabled = enabled && !isResolving,
-                onClick = onClick,
-                onLongClick = { showDeleteDialog = true }
+                onClick = onClick
             )
-            .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)),
-        color = Color.White.copy(alpha = 0.3f),
+            .border(
+                if (isSelected) 2.dp else 1.5.dp,
+                if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f),
+                RoundedCornerShape(20.dp)
+            ),
+        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.3f),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -546,6 +649,22 @@ fun StreamingItemCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
+                    }
+                }
+                
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
                     }
                 }
             }
