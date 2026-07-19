@@ -76,17 +76,21 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _resolvingUrlId = MutableStateFlow<Int?>(null)
     val resolvingUrlId: StateFlow<Int?> = _resolvingUrlId.asStateFlow()
 
+    private val _extractionError = MutableStateFlow<String?>(null)
+    val extractionError: StateFlow<String?> = _extractionError.asStateFlow()
+
     private val _playbackError = MutableStateFlow<String?>(null)
     val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
-
-    private val _isSelectionMode = MutableStateFlow(false)
-    val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
 
     private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
 
     private val _selectedStreamingIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedStreamingIds: StateFlow<Set<Int>> = _selectedStreamingIds.asStateFlow()
+
+    val isSelectionMode: StateFlow<Boolean> = combine(_selectedSongIds, _selectedStreamingIds) { songs, streaming ->
+        songs.isNotEmpty() || streaming.isNotEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private var isUserSeeking = false
 
@@ -147,8 +151,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun fetchStreamingMetadata(url: String) {
         viewModelScope.launch {
             _isExtracting.value = true
+            _extractionError.value = null
             try {
                 val items = YoutubeStreamHandler.getMetadata(url)
+                if (items.isEmpty()) {
+                    _extractionError.value = "No videos found in this URL"
+                    return@launch
+                }
+
                 if (items.size == 1 && !items[0].isPlaylist) {
                     // Single video, add immediately
                     repository.insertStreamingItems(items)
@@ -157,6 +167,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     _pendingStreamingItems.value = items
                 }
             } catch (e: Exception) {
+                _extractionError.value = "Extraction failed: ${e.localizedMessage}"
                 e.printStackTrace()
             } finally {
                 _isExtracting.value = false
@@ -327,7 +338,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val isAdding = !currentSelected.contains(songId)
         
         _selectionRange.value = SelectionRange(songId, currentSelected, isAdding)
-        _isSelectionMode.value = true
         
         // Initial state update
         updateRangeSelection(songId, allItems, isStreaming)
@@ -369,7 +379,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSelectionMode(enabled: Boolean) {
-        _isSelectionMode.value = enabled
         if (!enabled) {
             _selectedSongIds.value = emptySet()
             _selectedStreamingIds.value = emptySet()
@@ -384,11 +393,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             current.add(songId)
         }
         _selectedSongIds.value = current
-        if (current.isEmpty() && _selectedStreamingIds.value.isEmpty()) {
-            _isSelectionMode.value = false
-        } else {
-            _isSelectionMode.value = true
-        }
     }
 
     fun toggleStreamingSelection(itemId: Int) {
@@ -399,18 +403,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             current.add(itemId)
         }
         _selectedStreamingIds.value = current
-        if (current.isEmpty() && _selectedSongIds.value.isEmpty()) {
-            _isSelectionMode.value = false
-        } else {
-            _isSelectionMode.value = true
-        }
     }
 
     fun selectSong(songId: Int) {
         val current = _selectedSongIds.value.toMutableSet()
         if (current.add(songId)) {
             _selectedSongIds.value = current
-            _isSelectionMode.value = true
         }
     }
 
@@ -418,7 +416,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val current = _selectedStreamingIds.value.toMutableSet()
         if (current.add(itemId)) {
             _selectedStreamingIds.value = current
-            _isSelectionMode.value = true
         }
     }
 
@@ -436,9 +433,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             streamingIds.forEach { id ->
-                _topLevelStreamingItems.value.find { it.id == id }?.let { item ->
-                    repository.deleteStreamingItem(item)
-                }
+                repository.deleteStreamingItemById(id)
             }
 
             toggleSelectionMode(false)

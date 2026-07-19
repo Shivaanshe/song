@@ -21,6 +21,12 @@ interface StreamingDao {
     @Delete
     suspend fun deleteItem(item: StreamingItem)
     
+    @Query("DELETE FROM streaming_items WHERE id = :itemId")
+    suspend fun deleteItemById(itemId: Int)
+
+    @Query("SELECT * FROM streaming_items WHERE id = :itemId")
+    suspend fun getItemById(itemId: Int): StreamingItem?
+    
     @Query("UPDATE streaming_items SET title = :newTitle WHERE id = :itemId")
     suspend fun updateTitle(itemId: Int, newTitle: String)
     

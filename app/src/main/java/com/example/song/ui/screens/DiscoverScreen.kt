@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -69,6 +70,7 @@ fun DiscoverScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPlayingSong by viewModel.currentPlayingSong.collectAsState()
     val pendingItems by viewModel.pendingStreamingItems.collectAsState()
+    val extractionError by viewModel.extractionError.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -148,6 +150,37 @@ fun DiscoverScreen(
                             }
                         }
                     )
+                } else if (selectedPlaylist != null) {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        title = {
+                            Text(
+                                selectedPlaylist?.title ?: "Playlist",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF424242)
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = { selectedPlaylist = null },
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = Color(0xFF424242)
+                                )
+                            }
+                        }
+                    )
                 } else {
                     CenterAlignedTopAppBar(
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -181,7 +214,7 @@ fun DiscoverScreen(
                                 )
                             } else {
                                 Text(
-                                    selectedPlaylist?.title ?: "Discover",
+                                    "Discover",
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF424242)
@@ -191,31 +224,16 @@ fun DiscoverScreen(
                         },
                         navigationIcon = {
                             if (!isSearching) {
-                                if (selectedPlaylist != null) {
-                                    IconButton(
-                                        onClick = { selectedPlaylist = null },
-                                        modifier = Modifier
-                                            .padding(8.dp)
-                                            .background(Color.White.copy(alpha = 0.3f), CircleShape)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = "Back",
-                                            tint = Color(0xFF424242)
-                                        )
-                                    }
-                                } else {
-                                    IconButton(
-                                        onClick = { isSearching = true },
-                                        modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                                    ) {
-                                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
-                                    }
+                                IconButton(
+                                    onClick = { isSearching = true },
+                                    modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
                                 }
                             }
                         },
                         actions = {
-                            if (!isSearching && selectedPlaylist == null) {
+                            if (!isSearching) {
                                 IconButton(
                                     onClick = { if (isEngineReady) showAddMenu = !showAddMenu },
                                     modifier = Modifier
@@ -542,7 +560,7 @@ fun DiscoverScreen(
                                 onValueChange = { youtubeUrl = it },
                                 placeholder = { Text("https://youtube.com/...") },
                                 singleLine = true,
-                                isError = !isUrlValid && youtubeUrl.isNotBlank(),
+                                isError = (!isUrlValid && youtubeUrl.isNotBlank()) || extractionError != null,
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Black.copy(alpha = 0.05f),
                                     unfocusedContainerColor = Color.Black.copy(alpha = 0.03f),
@@ -556,6 +574,15 @@ fun DiscoverScreen(
                             if (!isUrlValid && youtubeUrl.isNotBlank()) {
                                 Text(
                                     "Invalid YouTube URL",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(top = 4.dp, start = 8.dp)
+                                )
+                            }
+                            
+                            extractionError?.let { error ->
+                                Text(
+                                    error,
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(top = 4.dp, start = 8.dp)
@@ -791,21 +818,33 @@ fun StreamingItemCard(
     selectionMode: Boolean = false
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "SelectionScale"
+    )
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .clickable(
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .combinedClickable(
                 enabled = enabled && !isResolving,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
             .border(
-                if (isSelected) 2.dp else 1.5.dp,
-                if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f),
-                RoundedCornerShape(20.dp)
+                width = if (isSelected) 2.dp else 1.5.dp,
+                brush = if (isSelected) {
+                    Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
+                } else {
+                    Brush.linearGradient(colors = listOf(Color.White.copy(alpha = 0.3f), Color.White.copy(alpha = 0.3f)))
+                },
+                shape = RoundedCornerShape(20.dp)
             ),
-        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.3f),
+        color = if (isSelected) Color.White.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.3f),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -850,11 +889,15 @@ fun StreamingItemCard(
                     }
                 }
 
-                if (isSelected) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isSelected,
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut()
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                            .background(Color.White.copy(alpha = 0.3f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -862,6 +905,7 @@ fun StreamingItemCard(
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(32.dp)
+                                .shadow(4.dp, CircleShape)
                         )
                     }
                 }
@@ -946,9 +990,16 @@ fun StreamingPlaylistCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "SelectionScale"
+    )
+
     Column(
         modifier = Modifier
             .width(120.dp)
+            .graphicsLayer(scaleX = scale, scaleY = scale)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
@@ -958,7 +1009,7 @@ fun StreamingPlaylistCard(
         Box(
             modifier = Modifier
                 .size(120.dp)
-                .shadow(12.dp, RoundedCornerShape(24.dp))
+                .shadow(if (isSelected) 4.dp else 12.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
                 .background(
                     brush = Brush.verticalGradient(
@@ -966,9 +1017,13 @@ fun StreamingPlaylistCard(
                     )
                 )
                 .border(
-                    if (isSelected) 3.dp else 1.5.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f),
-                    RoundedCornerShape(24.dp)
+                    width = if (isSelected) 3.dp else 1.5.dp,
+                    brush = if (isSelected) {
+                        Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
+                    } else {
+                        Brush.linearGradient(colors = listOf(Color.White.copy(alpha = 0.3f), Color.White.copy(alpha = 0.3f)))
+                    },
+                    shape = RoundedCornerShape(24.dp)
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -1003,11 +1058,15 @@ fun StreamingPlaylistCard(
                 )
             }
 
-            if (isSelected) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isSelected,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut()
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        .background(Color.White.copy(alpha = 0.3f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1015,6 +1074,7 @@ fun StreamingPlaylistCard(
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(48.dp)
+                            .shadow(8.dp, CircleShape)
                     )
                 }
             }

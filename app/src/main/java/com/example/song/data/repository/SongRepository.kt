@@ -85,6 +85,16 @@ class SongRepository(
         streamingDao.deleteItem(item)
     }
 
+    suspend fun deleteStreamingItemById(itemId: Int) {
+        val item = streamingDao.getItemById(itemId)
+        item?.let {
+            if (it.isPlaylist) {
+                streamingDao.deletePlaylistItems(it.youtubeUrl)
+            }
+            streamingDao.deleteItemById(itemId)
+        }
+    }
+
     suspend fun updateStreamingItemTitle(itemId: Int, newTitle: String) {
         streamingDao.updateTitle(itemId, newTitle)
     }

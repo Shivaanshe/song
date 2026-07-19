@@ -4,17 +4,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.song.ui.components.SongListItem
+import com.example.song.util.multiSelectDragHandler
 import com.example.song.viewmodel.SongViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,6 +28,12 @@ fun FavoritesScreen(
     onSongClick: () -> Unit
 ) {
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val selectedSongIds by viewModel.selectedSongIds.collectAsState()
+    
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(
@@ -38,21 +49,52 @@ fun FavoritesScreen(
     ) {
         Scaffold(
             containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                CenterAlignedTopAppBar(
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    title = {
-                        Text(
-                            "Favorites",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF333333)
+                if (isSelectionMode) {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.White.copy(alpha = 0.4f)
+                        ),
+                        title = {
+                            Text(
+                                "${selectedSongIds.size} Selected",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                             )
-                        )
-                    }
-                )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = {
+                                val count = selectedSongIds.size
+                                viewModel.deleteSelectedItems()
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Deleted $count items")
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
+                            }
+                        }
+                    )
+                } else {
+                    CenterAlignedTopAppBar(
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        title = {
+                            Text(
+                                "Favorites",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333)
+                                )
+                            )
+                        }
+                    )
+                }
             }
         ) { padding ->
             if (favoriteSongs.isEmpty()) {
@@ -70,24 +112,51 @@ fun FavoritesScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding),
+                        .padding(padding)
+                        .multiSelectDragHandler(
+                            listState = listState,
+                            onDragStart = { key ->
+                                if (key is Int) {
+                                    viewModel.startRangeSelection(key, favoriteSongs.map { it.id })
+                                }
+                            },
+                            onDragUpdate = { key ->
+                                if (key is Int) {
+                                    viewModel.updateRangeSelection(key, favoriteSongs.map { it.id })
+                                }
+                            },
+                            onDragEnd = {
+                                viewModel.endRangeSelection()
+                            }
+                        ),
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
-                    items(favoriteSongs) { song ->
+                    items(favoriteSongs, key = { it.id }) { song ->
                         SongListItem(
                             song = song,
                             onPlayClick = {
-                                viewModel.playSong(song, favoriteSongs)
-                                onSongClick()
+                                if (isSelectionMode) {
+                                    viewModel.toggleSongSelection(song.id)
+                                } else {
+                                    viewModel.playSong(song, favoriteSongs)
+                                    onSongClick()
+                                }
                             },
                             onFavoriteToggle = {
                                 viewModel.updateFavorite(song, !song.isFavorite)
                             },
                             onDelete = {
                                 viewModel.deleteSong(song.id)
-                            }
+                            },
+                            isSelected = selectedSongIds.contains(song.id),
+                            onLongClick = {
+                                viewModel.toggleSelectionMode(true)
+                                viewModel.toggleSongSelection(song.id)
+                            },
+                            selectionMode = isSelectionMode
                         )
                     }
                 }

@@ -1,5 +1,7 @@
 package com.example.song.ui.components
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -16,7 +18,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,24 +42,35 @@ fun SongListItem(
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "SelectionScale"
+    )
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .clickable(
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .combinedClickable(
                 onClick = {
                     if (selectionMode) onLongClick()
                     else onPlayClick()
-                }
+                },
+                onLongClick = onLongClick
             )
             .border(
-                if (isSelected) 2.dp else 0.dp,
-                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                RoundedCornerShape(20.dp)
+                width = if (isSelected) 2.dp else 0.dp,
+                brush = if (isSelected) {
+                    Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
+                } else {
+                    Brush.linearGradient(colors = listOf(Color.Transparent, Color.Transparent))
+                },
+                shape = RoundedCornerShape(20.dp)
             ),
-        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(20.dp),
-        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+        color = if (isSelected) Color.White.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(
             modifier = Modifier
@@ -71,12 +87,17 @@ fun SongListItem(
                         .clip(RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Crop
                 )
-                if (isSelected) {
+                
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isSelected,
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut()
+                ) {
                     Box(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                            .background(Color.White.copy(alpha = 0.3f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -84,6 +105,7 @@ fun SongListItem(
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(32.dp)
+                                .shadow(4.dp, CircleShape)
                         )
                     }
                 }
