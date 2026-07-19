@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +68,7 @@ fun DiscoverScreen(
     val resolvingUrlId by viewModel.resolvingUrlId.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPlayingSong by viewModel.currentPlayingSong.collectAsState()
+    val pendingItems by viewModel.pendingStreamingItems.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -569,7 +571,7 @@ fun DiscoverScreen(
                                 if (youtubeUrl.isNotBlank() && isUrlValid && isEngineReady) {
                                     val urlToAdd = youtubeUrl.trim()
                                     youtubeUrl = ""
-                                    viewModel.addStreamingItem(urlToAdd)
+                                    viewModel.fetchStreamingMetadata(urlToAdd)
                                     showAddDialog = false
                                 }
                             },
@@ -594,6 +596,183 @@ fun DiscoverScreen(
                 shape = RoundedCornerShape(28.dp),
                 containerColor = Color.White
             )
+        }
+
+        if (pendingItems.isNotEmpty()) {
+            val playlistItem = pendingItems.find { it.isPlaylist }
+            val firstTrack = pendingItems.find { !it.isPlaylist }
+            
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { viewModel.clearPendingStreamingItems() },
+                properties = androidx.compose.ui.window.DialogProperties(
+                    usePlatformDefaultWidth = false
+                )
+            ) {
+                var isVisible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { isVisible = true }
+
+                AnimatedVisibility(
+                    visible = isVisible,
+                    enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.8f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
+                    exit = fadeOut(tween(300)) + scaleOut(targetScale = 0.8f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .clip(RoundedCornerShape(32.dp))
+                            .background(Color.White.copy(alpha = 0.4f))
+                            .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
+                            .padding(24.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Immersive Header with Overlapping Images
+                            Box(
+                                modifier = Modifier
+                                    .height(180.dp)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                // Background Image (First Track)
+                                firstTrack?.thumbnailUrl?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(130.dp)
+                                            .rotate(-10f)
+                                            .offset(x = (-30).dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                                            .shadow(8.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                
+                                // Foreground Image (Playlist/Top)
+                                (playlistItem?.thumbnailUrl ?: firstTrack?.thumbnailUrl)?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(140.dp)
+                                            .rotate(5f)
+                                            .offset(x = 20.dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(24.dp))
+                                            .shadow(16.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "Import Playlist",
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF333333)
+                                    )
+                                )
+                                playlistItem?.let {
+                                    Text(
+                                        it.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color(0xFF666666),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+
+                            Text(
+                                "How would you like to add this playlist to your Discover screen?",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF424242),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Action Buttons
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.addPendingStreamingItems(asCollection = true) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                    contentPadding = PaddingValues(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text("Add as Collection", fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                    }
+                                }
+                                
+                                Surface(
+                                    onClick = { viewModel.addPendingStreamingItems(asCollection = false) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp),
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = Color(0xFF424242))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            "Add Individual Items",
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF424242)
+                                            )
+                                        )
+                                    }
+                                }
+
+                                TextButton(
+                                    onClick = { 
+                                        isVisible = false
+                                        scope.launch {
+                                            delay(300)
+                                            viewModel.clearPendingStreamingItems()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Cancel", color = Color(0xFF666666), fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

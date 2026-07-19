@@ -70,6 +70,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _isExtracting = MutableStateFlow(false)
     val isExtracting: StateFlow<Boolean> = _isExtracting.asStateFlow()
 
+    private val _pendingStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
+    val pendingStreamingItems: StateFlow<List<StreamingItem>> = _pendingStreamingItems.asStateFlow()
+
     private val _resolvingUrlId = MutableStateFlow<Int?>(null)
     val resolvingUrlId: StateFlow<Int?> = _resolvingUrlId.asStateFlow()
 
@@ -141,18 +144,46 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         return repository.getItemsForStreamingPlaylist(playlistUrl)
     }
 
-    fun addStreamingItem(url: String) {
+    fun fetchStreamingMetadata(url: String) {
         viewModelScope.launch {
             _isExtracting.value = true
             try {
                 val items = YoutubeStreamHandler.getMetadata(url)
-                repository.insertStreamingItems(items)
+                if (items.size == 1 && !items[0].isPlaylist) {
+                    // Single video, add immediately
+                    repository.insertStreamingItems(items)
+                } else {
+                    // Playlist or multiple items, show choice
+                    _pendingStreamingItems.value = items
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
                 _isExtracting.value = false
             }
         }
+    }
+
+    fun addPendingStreamingItems(asCollection: Boolean) {
+        viewModelScope.launch {
+            val items = _pendingStreamingItems.value
+            if (items.isEmpty()) return@launch
+
+            if (asCollection) {
+                repository.insertStreamingItems(items)
+            } else {
+                // Discard playlist container and add videos as top-level
+                val filteredItems = items.filter { !it.isPlaylist }.map { 
+                    it.copy(parentPlaylistUrl = null) 
+                }
+                repository.insertStreamingItems(filteredItems)
+            }
+            _pendingStreamingItems.value = emptyList()
+        }
+    }
+
+    fun clearPendingStreamingItems() {
+        _pendingStreamingItems.value = emptyList()
     }
 
     fun deleteStreamingItem(item: StreamingItem) {
