@@ -21,6 +21,9 @@ interface StreamingDao {
     @Delete
     suspend fun deleteItem(item: StreamingItem)
     
+    @Query("UPDATE streaming_items SET title = :newTitle WHERE id = :itemId")
+    suspend fun updateTitle(itemId: Int, newTitle: String)
+    
     @Query("DELETE FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl")
     suspend fun deletePlaylistItems(playlistUrl: String)
 }

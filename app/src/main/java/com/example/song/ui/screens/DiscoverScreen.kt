@@ -73,8 +73,8 @@ fun DiscoverScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var youtubeUrl by remember { mutableStateOf("") }
     var selectedPlaylist by remember { mutableStateOf<StreamingItem?>(null) }
-    
-    val isUrlValid = remember(youtubeUrl) { 
+
+    val isUrlValid = remember(youtubeUrl) {
         youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")))
     }
 
@@ -97,7 +97,7 @@ fun DiscoverScreen(
     }
 
     val playlists = remember(filteredItems) { filteredItems.filter { it.isPlaylist } }
-    val singleSongs = remember(filteredItems) { 
+    val singleSongs = remember(filteredItems) {
         filteredItems.filter { !it.isPlaylist && it.parentPlaylistUrl == null }
     }
 
@@ -106,7 +106,7 @@ fun DiscoverScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    
+
     // Auto-scroll logic handled by multiSelectDragHandler
 
     Box(
@@ -135,9 +135,9 @@ fun DiscoverScreen(
                             }
                         },
                         actions = {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 val count = selectedStreamingIds.size
-                                viewModel.deleteSelectedItems() 
+                                viewModel.deleteSelectedItems()
                                 scope.launch {
                                     snackbarHostState.showSnackbar("Deleted $count items")
                                 }
@@ -169,7 +169,7 @@ fun DiscoverScreen(
                                     ),
                                     shape = RoundedCornerShape(24.dp),
                                     trailingIcon = {
-                                        IconButton(onClick = { 
+                                        IconButton(onClick = {
                                             isSearching = false
                                             searchQuery = ""
                                         }) {
@@ -295,7 +295,7 @@ fun DiscoverScreen(
                                                 item = playlist,
                                                 isSelected = selectedStreamingIds.contains(playlist.id),
                                                 selectionMode = isSelectionMode,
-                                                onClick = { 
+                                                onClick = {
                                                     if (isSelectionMode) {
                                                         viewModel.toggleStreamingSelection(playlist.id)
                                                     } else {
@@ -469,7 +469,7 @@ fun DiscoverScreen(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { 
+                            .clickable {
                                 showAddMenu = false
                                 showAddDialog = true
                             }
@@ -505,12 +505,12 @@ fun DiscoverScreen(
 
         if (showAddDialog) {
             AlertDialog(
-                onDismissRequest = { 
+                onDismissRequest = {
                     if (!isExtracting) {
-                        showAddDialog = false 
+                        showAddDialog = false
                     }
                 },
-                title = { 
+                title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFFE91E63))
                         Spacer(modifier = Modifier.width(12.dp))
@@ -601,8 +601,8 @@ fun DiscoverScreen(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StreamingItemCard(
-    item: StreamingItem, 
-    enabled: Boolean = true, 
+    item: StreamingItem,
+    enabled: Boolean = true,
     isResolving: Boolean = false,
     isPlaying: Boolean = false,
     onClick: () -> Unit,
@@ -654,8 +654,8 @@ fun StreamingItemCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.MusicNote, 
-                            contentDescription = null, 
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
                             tint = Color.White.copy(alpha = 0.5f)
                         )
                     }
@@ -670,7 +670,7 @@ fun StreamingItemCard(
                         Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
                     }
                 }
-                
+
                 if (isSelected) {
                     Box(
                         modifier = Modifier
@@ -687,9 +687,9 @@ fun StreamingItemCard(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.title,
@@ -707,7 +707,7 @@ fun StreamingItemCard(
                     )
                 )
             }
-            
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isResolving) {
                     CircularProgressIndicator(
@@ -761,7 +761,7 @@ fun StreamingItemCard(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StreamingPlaylistCard(
-    item: StreamingItem, 
+    item: StreamingItem,
     isSelected: Boolean = false,
     selectionMode: Boolean = false,
     onClick: () -> Unit,
@@ -787,8 +787,8 @@ fun StreamingPlaylistCard(
                     )
                 )
                 .border(
-                    if (isSelected) 3.dp else 1.5.dp, 
-                    if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f), 
+                    if (isSelected) 3.dp else 1.5.dp,
+                    if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f),
                     RoundedCornerShape(24.dp)
                 ),
             contentAlignment = Alignment.Center
@@ -857,4 +857,3 @@ fun StreamingPlaylistCard(
         )
     }
 }
-

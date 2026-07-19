@@ -57,12 +57,22 @@ object YoutubeStreamHandler {
                 } catch (e: Exception) {}
             }
 
-            // If no playlist item found but URL has &list=, try to infer it might be a playlist that didn't dump as _type: playlist
-            if (playlistItem == null && url.contains("&list=")) {
-                // We'll create a dummy playlist item that will be populated by the first video's thumb if needed
+            // If no playlist item found but URL has list=, try to infer it might be a playlist
+            if (playlistItem == null && url.contains("list=")) {
                 playlistItem = StreamingItem(
                     youtubeUrl = url,
                     title = "YouTube Mix",
+                    thumbnailUrl = null,
+                    isPlaylist = true
+                )
+            }
+
+            // If we have multiple lines and no playlist item, but they aren't marked as playlist, 
+            // force a playlist container if there's more than 1 entry
+            if (playlistItem == null && lines.size > 1) {
+                playlistItem = StreamingItem(
+                    youtubeUrl = url,
+                    title = "YouTube Collection",
                     thumbnailUrl = null,
                     isPlaylist = true
                 )
@@ -85,9 +95,17 @@ object YoutubeStreamHandler {
                             } else null
                             val duration = json.optLong("duration", 0L)
                             
-                            // If this is the first video and playlist has no thumb, use this thumb
-                            if (playlistItem != null && playlistItem.thumbnailUrl == null && thumb != null) {
-                                playlistItem = playlistItem.copy(thumbnailUrl = thumb)
+                            // Update playlist metadata from the first valid video if needed
+                            if (playlistItem != null) {
+                                if (playlistItem.thumbnailUrl == null && thumb != null) {
+                                    playlistItem = playlistItem.copy(thumbnailUrl = thumb)
+                                }
+                                if (playlistItem.title == "YouTube Mix" || playlistItem.title == "YouTube Collection") {
+                                    val playlistTitle = json.optString("playlist_title")
+                                    if (playlistTitle.isNotEmpty()) {
+                                        playlistItem = playlistItem.copy(title = playlistTitle)
+                                    }
+                                }
                             }
 
                             items.add(StreamingItem(
@@ -104,6 +122,7 @@ object YoutubeStreamHandler {
                     Log.e(TAG, "Error parsing line: $e")
                 }
             }
+
             
             val result = mutableListOf<StreamingItem>()
             if (playlistItem != null) {

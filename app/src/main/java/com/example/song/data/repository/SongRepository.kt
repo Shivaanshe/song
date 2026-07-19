@@ -85,6 +85,10 @@ class SongRepository(
         streamingDao.deleteItem(item)
     }
 
+    suspend fun updateStreamingItemTitle(itemId: Int, newTitle: String) {
+        streamingDao.updateTitle(itemId, newTitle)
+    }
+
     suspend fun insertSong(song: Song) {
         val cleanTitle = song.title
             .substringAfterLast("/")

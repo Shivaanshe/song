@@ -161,6 +161,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateStreamingItemTitle(itemId: Int, newTitle: String) {
+        viewModelScope.launch {
+            repository.updateStreamingItemTitle(itemId, newTitle)
+        }
+    }
+
+    fun addStreamingItems(items: List<StreamingItem>) {
+        viewModelScope.launch {
+            repository.insertStreamingItems(items)
+        }
+    }
+
     fun initMediaController(context: Context) {
         val token = SessionToken(context, ComponentName(context, MusicService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
