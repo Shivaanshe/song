@@ -98,11 +98,7 @@ fun DiscoverScreen(
 
     val playlists = remember(filteredItems) { filteredItems.filter { it.isPlaylist } }
     val singleSongs = remember(filteredItems) { 
-        // Logic: Show items that are not playlists OR are individual songs from playlists
-        // but only if they are not explicitly marked as part of the "Recommended" (top-level) list
-        // Actually, the user wants playlist songs in Recommended too if they are "more than one".
-        // Let's just show all non-playlist items in Recommended for now to ensure visibility.
-        filteredItems.filter { !it.isPlaylist } 
+        filteredItems.filter { !it.isPlaylist && it.parentPlaylistUrl == null }
     }
 
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
@@ -294,10 +290,23 @@ fun DiscoverScreen(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                                         contentPadding = PaddingValues(horizontal = 24.dp)
                                     ) {
-                                        items(playlists) { playlist ->
-                                            StreamingPlaylistCard(playlist) { 
-                                                selectedPlaylist = playlist 
-                                            }
+                                        items(playlists, key = { it.id }) { playlist ->
+                                            StreamingPlaylistCard(
+                                                item = playlist,
+                                                isSelected = selectedStreamingIds.contains(playlist.id),
+                                                selectionMode = isSelectionMode,
+                                                onClick = { 
+                                                    if (isSelectionMode) {
+                                                        viewModel.toggleStreamingSelection(playlist.id)
+                                                    } else {
+                                                        selectedPlaylist = playlist
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    viewModel.toggleSelectionMode(true)
+                                                    viewModel.toggleStreamingSelection(playlist.id)
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -355,6 +364,7 @@ fun DiscoverScreen(
                     }
                 } else {
                     val playlistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist!!.youtubeUrl).collectAsState(initial = emptyList())
+                    val nonPlaylistItems = remember(playlistItems) { playlistItems.filter { !it.isPlaylist } }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -363,12 +373,12 @@ fun DiscoverScreen(
                                 listState = listState,
                                 onDragStart = { key ->
                                     if (key is Int) {
-                                        viewModel.startRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
+                                        viewModel.startRangeSelection(key, nonPlaylistItems.map { it.id }, isStreaming = true)
                                     }
                                 },
                                 onDragUpdate = { key ->
                                     if (key is Int) {
-                                        viewModel.updateRangeSelection(key, singleSongs.map { it.id }, isStreaming = true)
+                                        viewModel.updateRangeSelection(key, nonPlaylistItems.map { it.id }, isStreaming = true)
                                     }
                                 },
                                 onDragEnd = {
@@ -387,7 +397,7 @@ fun DiscoverScreen(
                                 )
                             )
                         }
-                        items(playlistItems, key = { it.id }) { item ->
+                        items(nonPlaylistItems, key = { it.id }) { item ->
                             val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
                             StreamingItemCard(
                                 item = item,
@@ -401,7 +411,7 @@ fun DiscoverScreen(
                                         if (isCurrentItemPlaying) {
                                             viewModel.togglePlayPause()
                                         } else {
-                                            viewModel.playStreamingItem(item, playlistItems)
+                                            viewModel.playStreamingItem(item, nonPlaylistItems)
                                             onSongClick()
                                         }
                                     }
@@ -411,6 +421,7 @@ fun DiscoverScreen(
                                 },
                                 isSelected = selectedStreamingIds.contains(item.id),
                                 onLongClick = {
+                                    viewModel.toggleSelectionMode(true)
                                     viewModel.toggleStreamingSelection(item.id)
                                 },
                                 selectionMode = isSelectionMode
@@ -747,12 +758,22 @@ fun StreamingItemCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun StreamingPlaylistCard(item: StreamingItem, onClick: () -> Unit) {
+fun StreamingPlaylistCard(
+    item: StreamingItem, 
+    isSelected: Boolean = false,
+    selectionMode: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
+) {
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable { onClick() },
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         horizontalAlignment = Alignment.Start
     ) {
         Box(
@@ -765,7 +786,11 @@ fun StreamingPlaylistCard(item: StreamingItem, onClick: () -> Unit) {
                         colors = listOf(Color(0xFFF06292), Color(0xFFBA68C8))
                     )
                 )
-                .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp)),
+                .border(
+                    if (isSelected) 3.dp else 1.5.dp, 
+                    if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.3f), 
+                    RoundedCornerShape(24.dp)
+                ),
             contentAlignment = Alignment.Center
         ) {
             if (!item.thumbnailUrl.isNullOrEmpty()) {
@@ -775,20 +800,6 @@ fun StreamingPlaylistCard(item: StreamingItem, onClick: () -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                // Overlay a small playlist icon in the corner
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.PlaylistPlay,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = Color.White
-                    )
-                }
             } else {
                 Icon(
                     Icons.Default.MusicNote,
@@ -796,18 +807,35 @@ fun StreamingPlaylistCard(item: StreamingItem, onClick: () -> Unit) {
                     modifier = Modifier.size(56.dp),
                     tint = Color.White.copy(alpha = 0.5f)
                 )
-                // Overlay a small playlist icon in the corner even if no thumb
+            }
+
+            // Overlay a small playlist icon in the corner
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.PlaylistPlay,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = Color.White
+                )
+            }
+
+            if (isSelected) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(8.dp),
-                    contentAlignment = Alignment.BottomEnd
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.PlaylistPlay,
+                        Icons.Default.Check,
                         contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = Color.White
+                        tint = Color.White,
+                        modifier = Modifier.size(48.dp)
                     )
                 }
             }

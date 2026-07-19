@@ -125,7 +125,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             repository.favoriteSongs.collect { _favoriteSongs.value = it }
         }
         viewModelScope.launch {
-            repository.topLevelStreamingItems.collect { _topLevelStreamingItems.value = it }
+            repository.topLevelStreamingItems.collect { items ->
+                _topLevelStreamingItems.value = items.filter { it.isPlaylist || it.parentPlaylistUrl == null }
+            }
         }
 
         /* viewModelScope.launch {
@@ -486,6 +488,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 duration = item.duration
             )
             _currentPlayingSong.value = streamingSong
+            _isPlaying.value = true
 
             _currentQueue.value = filteredQueue.map {
                 Song(

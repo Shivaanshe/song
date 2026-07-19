@@ -25,12 +25,11 @@ object YoutubeStreamHandler {
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
 
+            // First pass: Find playlist item if it exists
             for (line in lines) {
                 try {
                     val json = JSONObject(line)
-                    val type = json.optString("_type", "video")
-                    
-                    if (type == "playlist") {
+                    if (json.optString("_type") == "playlist") {
                         val playlistEntries = json.optJSONArray("entries")
                         val firstEntryThumb = if (playlistEntries != null && playlistEntries.length() > 0) {
                             val first = playlistEntries.getJSONObject(0)
@@ -53,7 +52,28 @@ object YoutubeStreamHandler {
                             } else firstEntryThumb,
                             isPlaylist = true
                         )
-                    } else {
+                        break
+                    }
+                } catch (e: Exception) {}
+            }
+
+            // If no playlist item found but URL has &list=, try to infer it might be a playlist that didn't dump as _type: playlist
+            if (playlistItem == null && url.contains("&list=")) {
+                // We'll create a dummy playlist item that will be populated by the first video's thumb if needed
+                playlistItem = StreamingItem(
+                    youtubeUrl = url,
+                    title = "YouTube Mix",
+                    thumbnailUrl = null,
+                    isPlaylist = true
+                )
+            }
+
+            for (line in lines) {
+                try {
+                    val json = JSONObject(line)
+                    val type = json.optString("_type", "video")
+                    
+                    if (type != "playlist") {
                         val id = json.optString("id")
                         if (id.isNotEmpty()) {
                             val title = json.optString("title", "Unknown Title")
@@ -65,6 +85,11 @@ object YoutubeStreamHandler {
                             } else null
                             val duration = json.optLong("duration", 0L)
                             
+                            // If this is the first video and playlist has no thumb, use this thumb
+                            if (playlistItem != null && playlistItem.thumbnailUrl == null && thumb != null) {
+                                playlistItem = playlistItem.copy(thumbnailUrl = thumb)
+                            }
+
                             items.add(StreamingItem(
                                 youtubeUrl = if (json.has("webpage_url")) json.getString("webpage_url") else "https://www.youtube.com/watch?v=$id",
                                 title = title,
@@ -81,7 +106,7 @@ object YoutubeStreamHandler {
             }
             
             val result = mutableListOf<StreamingItem>()
-            if (playlistItem != null && items.size > 1) {
+            if (playlistItem != null) {
                 result.add(playlistItem)
             }
             result.addAll(items)
