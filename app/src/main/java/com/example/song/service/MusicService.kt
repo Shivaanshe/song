@@ -22,6 +22,9 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    
+    // Track which items are currently being resolved to avoid duplicate work
+    private val resolvingIds = mutableSetOf<String>()
 
     override fun onCreate() {
         super.onCreate()
@@ -46,14 +49,33 @@ class MusicService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.let {
-                    val uriString = it.localConfiguration?.uri.toString()
-                    // Only resolve if it's a remote YouTube URL (http/https) and not already a resolved googlevideo URL
-                    val isYoutubeRemote = (uriString.startsWith("http") && 
-                        (uriString.contains("youtube.com") || uriString.contains("youtu.be"))) && 
-                        !uriString.contains("googlevideo.com")
-                    
-                    if (isYoutubeRemote) {
+                    // Resolve current item if needed
+                    if (isYoutubePlaceholder(it)) {
                         resolveYoutubeUrl(it)
+                    }
+                    
+                    // Proactively resolve nearby items in the queue
+                    resolveNearbyItems()
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // If we hit a source error, try to re-resolve the current item
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) {
+                    
+                    player.currentMediaItem?.let {
+                        // Only force re-resolve if it's a YouTube-sourced item
+                        val uriString = it.localConfiguration?.uri.toString()
+                        val isYoutubeSource = uriString.contains("youtube.com") || 
+                                              uriString.contains("youtu.be") || 
+                                              uriString.contains("googlevideo.com")
+                        
+                        if (isYoutubeSource) {
+                            android.util.Log.d("MusicService", "Source error detected for YouTube track. Attempting auto-recovery...")
+                            resolveYoutubeUrl(it, force = true)
+                        }
                     }
                 }
             }
@@ -71,29 +93,72 @@ class MusicService : MediaSessionService() {
             .build()
     }
 
-    private fun resolveYoutubeUrl(mediaItem: MediaItem) {
-        serviceScope.launch {
-            val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") 
-                ?: mediaItem.localConfiguration?.uri.toString()
+    private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
+        val uriString = mediaItem.localConfiguration?.uri.toString()
+        return (uriString.startsWith("http") && 
+                (uriString.contains("youtube.com") || uriString.contains("youtu.be"))) && 
+                !uriString.contains("googlevideo.com")
+    }
 
-            val directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
-            
-            if (directUrl != null) {
-                // Find index of this item
-                for (i in 0 until player.mediaItemCount) {
-                    if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
-                        val updatedItem = mediaItem.buildUpon()
-                            .setUri(directUrl)
-                            .build()
-                        
-                        player.replaceMediaItem(i, updatedItem)
-                        if (player.currentMediaItemIndex == i) {
-                            player.prepare()
-                            player.play()
+    private fun resolveNearbyItems() {
+        val currentIndex = player.currentMediaItemIndex
+        
+        // Items to resolve: Current + 1, Current + 2, and Previous (Current - 1)
+        val indicesToResolve = listOf(currentIndex + 1, currentIndex + 2, currentIndex - 1)
+        
+        for (index in indicesToResolve) {
+            if (index >= 0 && index < player.mediaItemCount) {
+                val item = player.getMediaItemAt(index)
+                if (isYoutubePlaceholder(item)) {
+                    resolveYoutubeUrl(item)
+                }
+            }
+        }
+    }
+
+    private fun resolveYoutubeUrl(mediaItem: MediaItem, force: Boolean = false) {
+        if (!force && resolvingIds.contains(mediaItem.mediaId)) return
+        
+        resolvingIds.add(mediaItem.mediaId)
+        
+        serviceScope.launch {
+            try {
+                // If it's a direct URL already and we're not forcing, skip
+                val currentUri = mediaItem.localConfiguration?.uri.toString()
+                if (!force && currentUri.contains("googlevideo.com")) {
+                    return@launch
+                }
+
+                val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") 
+                    ?: mediaItem.localConfiguration?.uri.toString()
+
+                val directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
+                
+                if (directUrl != null) {
+                    // Find index of this item in the current playlist
+                    for (i in 0 until player.mediaItemCount) {
+                        if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
+                            val updatedItem = mediaItem.buildUpon()
+                                .setUri(directUrl)
+                                .build()
+                            
+                            player.replaceMediaItem(i, updatedItem)
+                            
+                            // If this was the current item and we are in an error state or IDLE,
+                            // we need to re-prepare.
+                            if (player.currentMediaItemIndex == i && 
+                                (player.playbackState == Player.STATE_IDLE || player.playerError != null)) {
+                                player.prepare()
+                                player.play()
+                            }
+                            break
                         }
-                        break
                     }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                resolvingIds.remove(mediaItem.mediaId)
             }
         }
     }
