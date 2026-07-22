@@ -47,6 +47,7 @@ class SongRepository(
     val allPlaylists: Flow<List<Playlist>> = playlistDao.getAllPlaylists()
     val favoriteSongs: Flow<List<Song>> = songDao.getFavoriteSongs()
     val topLevelStreamingItems: Flow<List<StreamingItem>> = streamingDao.getAllTopLevelItems()
+    val allSongIdsInPlaylists: Flow<List<Int>> = playlistDao.getAllSongIdsInPlaylists()
 
     suspend fun scanAndRestoreSongs() = withContext(Dispatchers.IO) {
         val folders = listOf(File(baseDir, "Music"), File(baseDir, "DownloadedMusic"))
@@ -99,7 +100,7 @@ class SongRepository(
         streamingDao.updateTitle(itemId, newTitle)
     }
 
-    suspend fun insertSong(song: Song) {
+    suspend fun insertSong(song: Song): Int {
         val cleanTitle = song.title
             .substringAfterLast("/")
             .substringBeforeLast(".")
@@ -114,10 +115,10 @@ class SongRepository(
             null
         }
         
-        songDao.insertSong(song.copy(
+        return songDao.insertSong(song.copy(
             title = cleanTitle,
             imageUrl = coverUrl ?: song.imageUrl
-        ))
+        )).toInt()
     }
 
     suspend fun updateSong(song: Song) {
@@ -135,8 +136,12 @@ class SongRepository(
         songDao.deleteSong(songId)
     }
 
-    suspend fun createPlaylist(name: String) {
-        playlistDao.insertPlaylist(Playlist(name = name))
+    suspend fun createPlaylist(name: String): Int {
+        return playlistDao.insertPlaylist(Playlist(name = name)).toInt()
+    }
+
+    suspend fun deletePlaylist(playlistId: Int) {
+        playlistDao.deletePlaylistWithCrossRefs(playlistId)
     }
 
     suspend fun addSongToPlaylist(songId: Int, playlistId: Int) {
@@ -163,7 +168,11 @@ class SongRepository(
         downloadJob = null
     }
 
-    suspend fun downloadYouTubeAudio(url: String, progressCallback: (Float, Long) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun downloadYouTubeAudio(
+        url: String, 
+        playlistId: Int? = null,
+        progressCallback: (Float, Long) -> Unit
+    ) = withContext(Dispatchers.IO) {
         val requestId = UUID.randomUUID().toString()
         currentRequestId = requestId
         
@@ -216,8 +225,7 @@ class SongRepository(
                 throw Exception("Download failed: ${e.message}")
             }
 
-            // 3. Fallback check for different extensions (yt-dlp might fail to convert to mp3 if FFmpeg is missing, 
-            // though we initialized it in SongApplication)
+            // 3. Fallback check for different extensions
             val possibleExtensions = listOf("mp3", "m4a", "webm", "opus", "wav")
             var downloadedFile: File? = null
             
@@ -233,20 +241,18 @@ class SongRepository(
                 Log.d("SongRepository", "Success! File found: ${downloadedFile.absolutePath}")
                 
                 val extension = downloadedFile.extension
-                // Rename to something more friendly but safe
                 val safeTitle = (videoInfo.title ?: "Downloaded Song")
                     .replace(Regex("[\\\\/:*?\"<>|]"), "_")
-                    .take(100) // Limit length
+                    .take(100) 
                 var finalFile = File(musicDir, "$safeTitle.$extension")
                 
-                // Handle duplicate names
                 var counter = 1
                 while (finalFile.exists()) {
                     finalFile = File(musicDir, "$safeTitle ($counter).$extension")
                     counter++
                 }
                 
-                if (downloadedFile.renameTo(finalFile)) {
+                val songId = if (downloadedFile.renameTo(finalFile)) {
                     val song = Song(
                         title = videoInfo.title ?: finalFile.nameWithoutExtension,
                         artist = videoInfo.uploader ?: "YouTube",
@@ -256,7 +262,6 @@ class SongRepository(
                     )
                     insertSong(song)
                 } else {
-                    // If rename fails, use the requestId one
                     val song = Song(
                         title = videoInfo.title ?: downloadedFile.nameWithoutExtension,
                         artist = videoInfo.uploader ?: "YouTube",
@@ -265,6 +270,11 @@ class SongRepository(
                         duration = videoInfo.duration * 1000L
                     )
                     insertSong(song)
+                }
+
+                // Link to playlist if requested
+                if (playlistId != null) {
+                    addSongToPlaylist(songId, playlistId)
                 }
             } else {
                 val existingFiles = musicDir.list()?.joinToString(", ") ?: "none"

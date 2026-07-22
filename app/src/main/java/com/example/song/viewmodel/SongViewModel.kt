@@ -20,6 +20,7 @@ import com.example.song.data.repository.SongRepository
 import com.example.song.service.MusicService
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -28,7 +29,12 @@ import java.io.File
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: SongRepository
+    private val repository: SongRepository = SongRepository(
+        AppDatabase.getDatabase(application).songDao(),
+        AppDatabase.getDatabase(application).playlistDao(),
+        AppDatabase.getDatabase(application).streamingDao(),
+        application.filesDir
+    )
     private var mediaController: MediaController? = null
 
     private val _allSongs = MutableStateFlow<List<Song>>(emptyList())
@@ -73,6 +79,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
     val pendingStreamingItems: StateFlow<List<StreamingItem>> = _pendingStreamingItems.asStateFlow()
 
+    private val _pendingDownloadItems = MutableStateFlow<List<StreamingItem>>(emptyList())
+    val pendingDownloadItems: StateFlow<List<StreamingItem>> = _pendingDownloadItems.asStateFlow()
+
     private val _resolvingUrlId = MutableStateFlow<Int?>(null)
     val resolvingUrlId: StateFlow<Int?> = _resolvingUrlId.asStateFlow()
 
@@ -94,23 +103,22 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private var isUserSeeking = false
 
-    val filteredSongs = combine(_allSongs, _searchQuery) { songs, query ->
-        if (query.isBlank()) songs
-        else songs.filter { 
+    val filteredSongs = combine(
+        _allSongs, 
+        _searchQuery, 
+        repository.allSongIdsInPlaylists
+    ) { songs, query, idsInPlaylists ->
+        val playlistIds = idsInPlaylists.toSet()
+        val librarySongs = songs.filter { !playlistIds.contains(it.id) }
+        
+        if (query.isBlank()) librarySongs
+        else librarySongs.filter { 
             it.title.contains(query, ignoreCase = true) || 
             it.artist.contains(query, ignoreCase = true) 
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
-        val database = AppDatabase.getDatabase(application)
-        repository = SongRepository(
-            database.songDao(),
-            database.playlistDao(),
-            database.streamingDao(),
-            application.filesDir // Use filesDir for persistent storage
-        )
-
         viewModelScope.launch {
             repository.allSongs.collect { songs ->
                 _allSongs.value = songs
@@ -159,11 +167,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                if (items.size == 1 && !items[0].isPlaylist) {
-                    // Single video, add immediately
+                val hasPlaylistId = url.contains("list=")
+                if (items.size == 1 && !items[0].isPlaylist && !hasPlaylistId) {
+                    // Single video without a playlist ID, add immediately
                     repository.insertStreamingItems(items)
                 } else {
-                    // Playlist or multiple items, show choice
+                    // Playlist, multiple items, or URL with list=, show choice
                     _pendingStreamingItems.value = items
                 }
             } catch (e: Exception) {
@@ -446,6 +455,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deletePlaylist(playlistId: Int) {
+        viewModelScope.launch {
+            repository.deletePlaylist(playlistId)
+        }
+    }
+
     fun addSongToPlaylist(songId: Int, playlistId: Int) {
         viewModelScope.launch {
             repository.addSongToPlaylist(songId, playlistId)
@@ -579,18 +594,106 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = query
     }
 
-    fun downloadFromYoutube(url: String) {
+    fun fetchDownloadMetadata(url: String) {
         viewModelScope.launch {
-            // Check if engine is ready
-            val isEngineReady = com.example.song.SongApplication.getInstance().isReady.value
-            if (!isEngineReady) {
-                _downloadState.value = DownloadState.Error("Music engine is still initializing. Please wait.")
-                delay(3000)
-                _downloadState.value = DownloadState.Idle
-                return@launch
+            _isExtracting.value = true
+            try {
+                // Sanitize: If it has list=, force playlist mode
+                val sanitizedUrl = if (url.contains("list=")) {
+                    val listId = url.substringAfter("list=").substringBefore("&")
+                    "https://www.youtube.com/playlist?list=$listId"
+                } else url
+
+                val items = YoutubeStreamHandler.getMetadata(sanitizedUrl)
+                val hasPlaylistId = url.contains("list=")
+                
+                if (items.size == 1 && !items[0].isPlaylist && !hasPlaylistId) {
+                    // Single video without playlist ID, download immediately
+                    downloadFromYoutube(items[0].youtubeUrl)
+                } else {
+                    // Playlist, multiple items, or URL with list=, show choice
+                    _pendingDownloadItems.value = items
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isExtracting.value = false
+            }
+        }
+    }
+
+    fun startBatchDownload(asPlaylist: Boolean) {
+        viewModelScope.launch {
+            // Self-Heal Improvement: Wait for engine readiness
+            val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
+            if (!isReadyFlow.value) {
+                _downloadState.value = DownloadState.Downloading(0f)
+                try {
+                    withTimeout(15000) {
+                        isReadyFlow.first { it }
+                    }
+                } catch (e: Exception) {
+                    _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
+                    delay(3000)
+                    _downloadState.value = DownloadState.Idle
+                    return@launch
+                }
             }
 
-            _downloadState.value = DownloadState.Downloading(0f)
+            val items = _pendingDownloadItems.value.filter { !it.isPlaylist }
+            if (items.isEmpty()) return@launch
+
+            val playlistItem = _pendingDownloadItems.value.find { it.isPlaylist }
+            val playlistId = if (asPlaylist) {
+                val name = playlistItem?.title ?: "Downloaded Playlist"
+                repository.createPlaylist(name)
+            } else {
+                null
+            }
+
+            _pendingDownloadItems.value = emptyList()
+            
+            _downloadState.value = DownloadState.Downloading(0f, 1, items.size)
+            
+            items.forEachIndexed { index, item ->
+                try {
+                    _downloadState.value = DownloadState.Downloading(0f, index + 1, items.size)
+                    repository.downloadYouTubeAudio(item.youtubeUrl, playlistId) { progress, _ ->
+                        _downloadState.value = DownloadState.Downloading(progress, index + 1, items.size)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("SongViewModel", "Failed to download ${item.title}", e)
+                }
+            }
+            
+            _downloadState.value = DownloadState.Success
+            delay(3000)
+            _downloadState.value = DownloadState.Idle
+        }
+    }
+
+    fun clearPendingDownloadItems() {
+        _pendingDownloadItems.value = emptyList()
+    }
+
+    fun downloadFromYoutube(url: String) {
+        viewModelScope.launch {
+            // Self-Heal Improvement: Wait for engine readiness instead of failing immediately
+            val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
+            if (!isReadyFlow.value) {
+                _downloadState.value = DownloadState.Downloading(0f) // Show preparing state
+                try {
+                    withTimeout(15000) { // Wait up to 15 seconds
+                        isReadyFlow.first { it }
+                    }
+                } catch (e: Exception) {
+                    _downloadState.value = DownloadState.Error("Music engine failed to initialize. Please restart.")
+                    delay(3000)
+                    _downloadState.value = DownloadState.Idle
+                    return@launch
+                }
+            }
+
             try {
                 repository.downloadYouTubeAudio(url) { progress, _ ->
                     _downloadState.value = DownloadState.Downloading(progress)
@@ -670,7 +773,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
 sealed class DownloadState {
     object Idle : DownloadState()
-    data class Downloading(val progress: Float) : DownloadState()
+    data class Downloading(
+        val progress: Float,
+        val current: Int = 1,
+        val total: Int = 1
+    ) : DownloadState()
     object Success : DownloadState()
     data class Error(val message: String) : DownloadState()
 }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 interface SongDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSong(song: Song)
+    suspend fun insertSong(song: Song): Long
 
     @Update
     suspend fun updateSong(song: Song)

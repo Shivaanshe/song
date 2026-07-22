@@ -16,6 +16,10 @@ object YoutubeStreamHandler {
             val request = YoutubeDLRequest(url).apply {
                 addOption("--dump-json")
                 addOption("--flat-playlist")
+                addOption("--yes-playlist")
+                addOption("--no-check-certificate")
+                // For Mix/Radio URLs, we often need to limit the count or it might hang forever
+                addOption("--playlist-end", "50") 
             }
             
             val response = YoutubeDL.getInstance().execute(request)

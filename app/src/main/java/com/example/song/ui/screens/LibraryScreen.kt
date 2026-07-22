@@ -67,6 +67,8 @@ fun LibraryScreen(
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
+    val isExtracting by viewModel.isExtracting.collectAsState()
+    val pendingDownloadItems by viewModel.pendingDownloadItems.collectAsState()
     val isEngineReady by SongApplication.getInstance().isReady.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -235,95 +237,132 @@ fun LibraryScreen(
                 }
             }
         ) { padding ->
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .multiSelectDragHandler(
-                        listState = listState,
-                        onDragStart = { key ->
-                            if (key is Int) {
-                                viewModel.startRangeSelection(key, songs.map { it.id })
+            Column(modifier = Modifier.padding(padding)) {
+                if (isExtracting || downloadState is DownloadState.Downloading) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.8f),
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = Color(0xFFE91E63),
+                                trackColor = Color.Black.copy(alpha = 0.05f)
+                            )
+                            
+                            val progressText = if (isExtracting) {
+                                "Checking link..."
+                            } else {
+                                val state = downloadState as DownloadState.Downloading
+                                if (state.total > 1) {
+                                    "Batch Download: ${state.current} of ${state.total} (${state.progress.toInt()}%)"
+                                } else {
+                                    "Downloading... ${state.progress.toInt()}%"
+                                }
                             }
-                        },
-                        onDragUpdate = { key ->
-                            if (key is Int) {
-                                viewModel.updateRangeSelection(key, songs.map { it.id })
-                            }
-                        },
-                        onDragEnd = {
-                            viewModel.endRangeSelection()
-                        }
-                    ),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                if (!isSearching) {
-                    // Collections Section (Playlists)
-                    item {
-                        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                            
                             Text(
-                                "Collections",
+                                text = progressText,
+                                modifier = Modifier.padding(top = 8.dp),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFFE91E63)
+                            )
+                        }
+                    }
+                }
+                
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .multiSelectDragHandler(
+                            listState = listState,
+                            onDragStart = { key ->
+                                if (key is Int) {
+                                    viewModel.startRangeSelection(key, songs.map { it.id })
+                                }
+                            },
+                            onDragUpdate = { key ->
+                                if (key is Int) {
+                                    viewModel.updateRangeSelection(key, songs.map { it.id })
+                                }
+                            },
+                            onDragEnd = {
+                                viewModel.endRangeSelection()
+                            }
+                        ),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    if (!isSearching) {
+                        // Collections Section (Playlists)
+                        item {
+                            Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+                                Text(
+                                    "Collections",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF424242)
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    contentPadding = PaddingValues(end = 24.dp)
+                                ) {
+                                    items(playlists, key = { it.id }) { playlist ->
+                                        PlaylistCard(playlist, viewModel) { onPlaylistClick(playlist) }
+                                    }
+                                    // Hardcoded Favorites Card
+                                    item {
+                                        FavoritesCollectionCard(favoriteSongs.size) {
+                                            onFavoritesClick()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Recommended Section Header
+                        item {
+                            Text(
+                                "Library Tracks",
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF424242)
                                 )
                             )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                contentPadding = PaddingValues(end = 24.dp)
-                            ) {
-                                items(playlists) { playlist ->
-                                    PlaylistCard(playlist) { onPlaylistClick(playlist) }
-                                }
-                                // Hardcoded Favorites Card
-                                item {
-                                    FavoritesCollectionCard(favoriteSongs.size) {
-                                        onFavoritesClick()
-                                    }
-                                }
-                            }
                         }
                     }
 
-                    // Recommended Section Header
-                    item {
-                        Text(
-                            "Recommended",
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF424242)
-                            )
+                    items(songs, key = { it.id }) { song ->
+                        SongListItem(
+                            song = song,
+                            onPlayClick = {
+                                if (isSelectionMode) {
+                                    viewModel.toggleSongSelection(song.id)
+                                } else {
+                                    viewModel.playSong(song, songs)
+                                    onSongClick()
+                                }
+                            },
+                            onFavoriteToggle = {
+                                viewModel.updateFavorite(song, !song.isFavorite)
+                            },
+                            onDelete = {
+                                viewModel.deleteSong(song.id)
+                            },
+                            isSelected = selectedSongIds.contains(song.id),
+                            onLongClick = {
+                                viewModel.toggleSelectionMode(true)
+                                viewModel.toggleSongSelection(song.id)
+                            },
+                            selectionMode = isSelectionMode
                         )
                     }
-                }
-
-                items(songs, key = { it.id }) { song ->
-                    SongListItem(
-                        song = song,
-                        onPlayClick = {
-                            if (isSelectionMode) {
-                                viewModel.toggleSongSelection(song.id)
-                            } else {
-                                viewModel.playSong(song, songs)
-                                onSongClick()
-                            }
-                        },
-                        onFavoriteToggle = {
-                            viewModel.updateFavorite(song, !song.isFavorite)
-                        },
-                        onDelete = {
-                            viewModel.deleteSong(song.id)
-                        },
-                        isSelected = selectedSongIds.contains(song.id),
-                        onLongClick = {
-                            viewModel.toggleSelectionMode(true)
-                            viewModel.toggleSongSelection(song.id)
-                        },
-                        selectionMode = isSelectionMode
-                    )
                 }
             }
         }
@@ -439,21 +478,14 @@ fun LibraryScreen(
                 },
                 text = {
                     Column {
-                        if (downloadState is DownloadState.Downloading) {
-                            val progress = (downloadState as DownloadState.Downloading).progress
+                        if (isExtracting) {
                             Column(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                CircularProgressIndicator(
-                                    progress = { if (progress > 0) progress / 100f else 0f },
-                                    color = Color(0xFFE91E63)
-                                )
+                                CircularProgressIndicator(color = Color(0xFFE91E63))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    if (progress > 0) "Downloading... ${progress.toInt()}%" else "Preparing...",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
+                                Text("Extracting...", style = MaterialTheme.typography.labelMedium)
                             }
                         } else {
                             Text(
@@ -512,7 +544,8 @@ fun LibraryScreen(
                                 if (youtubeUrl.isNotBlank() && isUrlValid && isEngineReady) {
                                     val urlToDownload = youtubeUrl.trim()
                                     youtubeUrl = ""
-                                    viewModel.downloadFromYoutube(urlToDownload)
+                                    viewModel.fetchDownloadMetadata(urlToDownload)
+                                    showDownloadDialog = false
                                 }
                             },
                             enabled = youtubeUrl.isNotBlank() && isUrlValid && isEngineReady,
@@ -539,6 +572,184 @@ fun LibraryScreen(
                 shape = RoundedCornerShape(28.dp),
                 containerColor = Color.White
             )
+        }
+
+        // Batch Download Options Dialog
+        if (pendingDownloadItems.isNotEmpty()) {
+            val playlistItem = pendingDownloadItems.find { it.isPlaylist }
+            val firstTrack = pendingDownloadItems.find { !it.isPlaylist }
+            
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { viewModel.clearPendingDownloadItems() },
+                properties = androidx.compose.ui.window.DialogProperties(
+                    usePlatformDefaultWidth = false
+                )
+            ) {
+                var isVisible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { isVisible = true }
+
+                AnimatedVisibility(
+                    visible = isVisible,
+                    enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.8f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
+                    exit = fadeOut(tween(300)) + scaleOut(targetScale = 0.8f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .clip(RoundedCornerShape(32.dp))
+                            .background(Color.White.copy(alpha = 0.4f))
+                            .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
+                            .padding(24.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Immersive Header with Overlapping Images
+                            Box(
+                                modifier = Modifier
+                                    .height(180.dp)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                // Background Image
+                                firstTrack?.thumbnailUrl?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(130.dp)
+                                            .rotate(-10f)
+                                            .offset(x = (-30).dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                                            .shadow(8.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                
+                                // Foreground Image
+                                (playlistItem?.thumbnailUrl ?: firstTrack?.thumbnailUrl)?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(140.dp)
+                                            .rotate(5f)
+                                            .offset(x = 20.dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(24.dp))
+                                            .shadow(16.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "Download Playlist",
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF333333)
+                                    )
+                                )
+                                playlistItem?.let {
+                                    Text(
+                                        it.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color(0xFF666666),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+
+                            Text(
+                                "How would you like to save these songs in your Library?",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF424242),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Action Buttons
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.startBatchDownload(asPlaylist = true) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                    contentPadding = PaddingValues(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text("Save as Collection", fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                    }
+                                }
+                                
+                                Surface(
+                                    onClick = { viewModel.startBatchDownload(asPlaylist = false) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(56.dp),
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.3f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = Color(0xFF424242))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            "Individual Tracks",
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF424242)
+                                            )
+                                        )
+                                    }
+                                }
+
+                                TextButton(
+                                    onClick = { 
+                                        isVisible = false
+                                        scope.launch {
+                                            delay(300)
+                                            viewModel.clearPendingDownloadItems()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Cancel", color = Color(0xFF666666), fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -577,12 +788,20 @@ fun AddMenuOption(text: String, icon: ImageVector, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
+fun PlaylistCard(playlist: Playlist, viewModel: SongViewModel, onClick: () -> Unit) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    val playlistSongs by viewModel.getSongsInPlaylist(playlist.id).collectAsState(initial = emptyList())
+    val coverImage = remember(playlistSongs) { playlistSongs.firstOrNull()?.imageUrl }
+
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable { onClick() },
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showDeleteDialog = true }
+            ),
         horizontalAlignment = Alignment.Start
     ) {
         Box(
@@ -591,14 +810,24 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
                 .shadow(12.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color.White.copy(alpha = 0.2f))
-                .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(24.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                Icons.Default.MusicNote,
-                contentDescription = null,
-                modifier = Modifier.align(Alignment.Center).size(48.dp),
-                tint = Color.White
-            )
+            if (coverImage != null) {
+                AsyncImage(
+                    model = coverImage,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = Color.White
+                )
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -614,6 +843,27 @@ fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
             text = "Playlist",
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFF666666)
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Playlist") },
+            text = { Text("Are you sure you want to delete '${playlist.name}'?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deletePlaylist(playlist.id)
+                    showDeleteDialog = false
+                }) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }

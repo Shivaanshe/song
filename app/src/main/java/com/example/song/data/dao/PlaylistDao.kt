@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPlaylist(playlist: Playlist)
+    suspend fun insertPlaylist(playlist: Playlist): Long
 
     @Delete
     suspend fun deletePlaylist(playlist: Playlist)
@@ -23,6 +23,18 @@ interface PlaylistDao {
     @Delete
     suspend fun removeSongFromPlaylist(crossRef: PlaylistSongCrossRef)
 
+    @Query("DELETE FROM playlists WHERE id = :playlistId")
+    suspend fun deletePlaylistById(playlistId: Int)
+
+    @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId = :playlistId")
+    suspend fun deletePlaylistCrossRefs(playlistId: Int)
+
+    @Transaction
+    suspend fun deletePlaylistWithCrossRefs(playlistId: Int) {
+        deletePlaylistCrossRefs(playlistId)
+        deletePlaylistById(playlistId)
+    }
+
     @Transaction
     @Query("""
         SELECT songs.* FROM songs 
@@ -30,4 +42,7 @@ interface PlaylistDao {
         WHERE playlist_song_cross_ref.playlistId = :playlistId
     """)
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>>
+
+    @Query("SELECT songId FROM playlist_song_cross_ref")
+    fun getAllSongIdsInPlaylists(): Flow<List<Int>>
 }
