@@ -84,6 +84,7 @@ fun PlaylistDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(300.dp)
+                        .statusBarsPadding()
                 ) {
                     AsyncImage(
                         model = if (songsInPlaylist.isNotEmpty()) songsInPlaylist.first().imageUrl else null,

@@ -49,8 +49,7 @@ fun GlassNavigationBar(navController: NavController) {
     ) {
         NavigationBar(
             containerColor = Color.Transparent,
-            modifier = Modifier.height(64.dp),
-            windowInsets = WindowInsets(0, 0, 0, 0)
+            modifier = Modifier.height(64.dp)
         ) {
             items.forEach { screen ->
                 val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
