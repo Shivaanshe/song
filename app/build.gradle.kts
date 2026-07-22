@@ -71,10 +71,10 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
 
     // Room database
-    val room_version = "2.7.0-alpha11"
-    implementation("androidx.room:room-runtime:$room_version")
-    ksp("androidx.room:room-compiler:$room_version")
-    implementation("androidx.room:room-ktx:$room_version")
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.sqlite.jdbc)
 
     // Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
