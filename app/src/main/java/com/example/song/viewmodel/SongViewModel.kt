@@ -473,6 +473,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun removeSelectedFromPlaylist(playlistId: Int) {
+        viewModelScope.launch {
+            val songIds = _selectedSongIds.value.toList()
+            songIds.forEach { id ->
+                repository.removeSongFromPlaylist(id, playlistId)
+            }
+            toggleSelectionMode(false)
+        }
+    }
+
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>> {
         return repository.getSongsInPlaylist(playlistId)
     }

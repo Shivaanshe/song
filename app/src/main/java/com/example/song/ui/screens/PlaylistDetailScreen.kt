@@ -1,40 +1,47 @@
 package com.example.song.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Repeat
-import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.example.song.ui.components.SongListItem
+import com.example.song.util.multiSelectDragHandler
 import com.example.song.viewmodel.SongViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +58,12 @@ fun PlaylistDetailScreen(
         viewModel.getSongsInPlaylist(playlistId).collectAsState(initial = emptyList())
     }
     
+    val isSelectionMode by viewModel.isSelectionMode.collectAsState()
+    val selectedSongIds by viewModel.selectedSongIds.collectAsState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
     val repeatMode by viewModel.repeatMode.collectAsState()
     var rotationAngle by remember { mutableFloatStateOf(0f) }
     val animatedRotation by animateFloatAsState(
@@ -69,173 +82,345 @@ fun PlaylistDetailScreen(
         )
     )
 
+    // Clear selection on disposal
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.toggleSelectionMode(false)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundGradient)
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 80.dp)
-        ) {
-            // Header with Image and Overlay
-            item {
-                Box(
+        Scaffold(
+            containerColor = Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarHostState) }
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(300.dp)
-                        .statusBarsPadding()
-                ) {
-                    AsyncImage(
-                        model = if (songsInPlaylist.isNotEmpty()) songsInPlaylist.first().imageUrl else null,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                    
-                    // Gradient overlay for text readability
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
-                                )
-                            )
-                    )
-
-                    // Back Button
-                    IconButton(
-                        onClick = onBackClick,
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .align(Alignment.TopStart)
-                            .background(Color.White.copy(alpha = 0.3f), CircleShape)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
-                    }
-
-                    // Playlist Name and Info
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(24.dp)
-                    ) {
-                        Text(
-                            text = playlistName,
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Text(
-                            text = "${songsInPlaylist.size} songs",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Play All and Repeat Buttons
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Button(
-                        onClick = { 
-                            if (songsInPlaylist.isNotEmpty()) {
-                                viewModel.playSong(songsInPlaylist.first(), songsInPlaylist)
-                                onSongClick()
+                        .fillMaxSize()
+                        .multiSelectDragHandler(
+                            listState = listState,
+                            onDragStart = { key ->
+                                if (key is Int) {
+                                    viewModel.startRangeSelection(key, songsInPlaylist.map { it.id })
+                                }
+                            },
+                            onDragUpdate = { key ->
+                                if (key is Int) {
+                                    viewModel.updateRangeSelection(key, songsInPlaylist.map { it.id })
+                                }
+                            },
+                            onDragEnd = {
+                                viewModel.endRangeSelection()
                             }
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(56.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                        contentPadding = PaddingValues(),
-                        shape = RoundedCornerShape(28.dp)
-                    ) {
+                        ),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    // Immersive Header with Image Stack and Blurry Background
+                    item {
+                        val firstTrackImage = if (songsInPlaylist.isNotEmpty()) songsInPlaylist.first().imageUrl else null
+                        val secondTrackImage = if (songsInPlaylist.size > 1) songsInPlaylist[1].imageUrl else firstTrackImage
+
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .height(400.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Play All", fontWeight = FontWeight.Bold)
+                            // 1. Blurry Background Artwork
+                            AsyncImage(
+                                model = firstTrackImage,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .blur(30.dp)
+                                    .graphicsLayer(alpha = 0.6f),
+                                contentScale = ContentScale.Crop
+                            )
+                            
+                            // 2. Dark/Glass Overlay for depth
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Black.copy(alpha = 0.2f),
+                                                Color.Black.copy(alpha = 0.7f)
+                                            )
+                                        )
+                                    )
+                            )
+
+                            // 3. Back Button (Safe Area)
+                            if (!isSelectionMode) {
+                                IconButton(
+                                    onClick = onBackClick,
+                                    modifier = Modifier
+                                        .statusBarsPadding()
+                                        .padding(16.dp)
+                                        .align(Alignment.TopStart)
+                                        .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+
+                            // 4. Stylized 2-Image Stack
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.Center)
+                                    .padding(bottom = 60.dp), // Lift up for title space
+                                contentAlignment = Alignment.Center
+                            ) {
+                                // Background Card
+                                secondTrackImage?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(170.dp)
+                                            .rotate(-8f)
+                                            .offset(x = (-25).dp)
+                                            .clip(RoundedCornerShape(28.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(28.dp))
+                                            .shadow(12.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+
+                                // Foreground Card (Main)
+                                firstTrackImage?.let { url ->
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(190.dp)
+                                            .rotate(4f)
+                                            .offset(x = 15.dp)
+                                            .clip(RoundedCornerShape(32.dp))
+                                            .border(2.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(32.dp))
+                                            .shadow(24.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } ?: Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(100.dp),
+                                    tint = Color.White.copy(alpha = 0.5f)
+                                )
+                            }
+
+                            // 5. Playlist Metadata (Centered)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomCenter)
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = playlistName,
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    ),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${songsInPlaylist.size} songs",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
                             }
                         }
                     }
 
+                    // Play All and Repeat Buttons
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Button(
+                                onClick = { 
+                                    if (songsInPlaylist.isNotEmpty()) {
+                                        viewModel.playSong(songsInPlaylist.first(), songsInPlaylist)
+                                        onSongClick()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(56.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                contentPadding = PaddingValues(),
+                                shape = RoundedCornerShape(28.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Play All", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .height(56.dp)
+                                    .width(110.dp),
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(28.dp),
+                                onClick = { 
+                                    rotationAngle += 360f
+                                    viewModel.toggleRepeatMode() 
+                                }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = when (repeatMode) {
+                                                Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
+                                                else -> Icons.Default.Repeat
+                                            },
+                                            contentDescription = null, 
+                                            tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFF4CAF50),
+                                            modifier = Modifier.rotate(animatedRotation)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Repeat", 
+                                            color = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFF4CAF50), 
+                                            fontWeight = FontWeight.Bold, 
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Recommended Section (Songs in Playlist)
+                    items(songsInPlaylist, key = { it.id }) { song ->
+                        SongListItem(
+                            song = song,
+                            onPlayClick = {
+                                if (isSelectionMode) {
+                                    viewModel.toggleSongSelection(song.id)
+                                } else {
+                                    viewModel.playSong(song, songsInPlaylist)
+                                    onSongClick()
+                                }
+                            },
+                            onFavoriteToggle = {
+                                viewModel.updateFavorite(song, !song.isFavorite)
+                            },
+                            onDelete = {
+                                if (playlistId == -1) {
+                                    viewModel.updateFavorite(song, false)
+                                } else {
+                                    viewModel.removeSongFromPlaylist(song.id, playlistId)
+                                }
+                            },
+                            isSelected = selectedSongIds.contains(song.id),
+                            onLongClick = {
+                                viewModel.toggleSelectionMode(true)
+                                viewModel.toggleSongSelection(song.id)
+                            },
+                            selectionMode = isSelectionMode
+                        )
+                    }
+                }
+
+                // Selection Top Bar Overlay
+                AnimatedVisibility(
+                    visible = isSelectionMode,
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut(),
+                    modifier = Modifier.zIndex(10f)
+                ) {
                     Surface(
                         modifier = Modifier
-                            .height(56.dp)
-                            .width(110.dp),
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(28.dp),
-                        onClick = { 
-                            rotationAngle += 360f
-                            viewModel.toggleRepeatMode() 
-                        }
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(12.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.White.copy(alpha = 0.85f),
+                        tonalElevation = 8.dp,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = when (repeatMode) {
-                                        Player.REPEAT_MODE_ONE -> Icons.Default.RepeatOne
-                                        else -> Icons.Default.Repeat
-                                    },
-                                    contentDescription = null, 
-                                    tint = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFF4CAF50),
-                                    modifier = Modifier.rotate(animatedRotation)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Repeat", 
-                                    color = if (repeatMode == Player.REPEAT_MODE_OFF) Color(0xFF424242) else Color(0xFF4CAF50), 
-                                    fontWeight = FontWeight.Bold, 
-                                    fontSize = 14.sp
-                                )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp)
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242))
+                            }
+                            
+                            Spacer(modifier = Modifier.width(16.dp))
+                            
+                            Text(
+                                text = "${selectedSongIds.size} Selected",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            IconButton(onClick = {
+                                val count = selectedSongIds.size
+                                if (playlistId == -1) {
+                                    // In favorites, batch remove is batch updateFavorite(false)
+                                    scope.launch {
+                                        val ids = selectedSongIds.toList()
+                                        ids.forEach { id ->
+                                            songsInPlaylist.find { it.id == id }?.let {
+                                                viewModel.updateFavorite(it, false)
+                                            }
+                                        }
+                                        viewModel.toggleSelectionMode(false)
+                                    }
+                                } else {
+                                    viewModel.removeSelectedFromPlaylist(playlistId)
+                                }
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Removed $count items")
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove Selected", tint = Color.Red)
                             }
                         }
                     }
                 }
-            }
-
-            // Recommended Section (Songs in Playlist)
-            items(songsInPlaylist) { song ->
-                SongListItem(
-                    song = song,
-                    onPlayClick = {
-                        viewModel.playSong(song, songsInPlaylist)
-                        onSongClick()
-                    },
-                    onFavoriteToggle = {
-                        viewModel.updateFavorite(song, !song.isFavorite)
-                    },
-                    onDelete = {
-                        if (playlistId == -1) {
-                            viewModel.updateFavorite(song, false)
-                        } else {
-                            viewModel.removeSongFromPlaylist(song.id, playlistId)
-                        }
-                    }
-                )
             }
         }
 

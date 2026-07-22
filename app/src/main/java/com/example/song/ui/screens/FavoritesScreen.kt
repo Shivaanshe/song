@@ -1,5 +1,7 @@
 package com.example.song.ui.screens
 
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,11 +13,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.example.song.ui.components.SongListItem
 import com.example.song.util.multiSelectDragHandler
 import com.example.song.viewmodel.SongViewModel
@@ -51,50 +55,20 @@ fun FavoritesScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                if (isSelectionMode) {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.White.copy(alpha = 0.4f)
-                        ),
-                        title = {
-                            Text(
-                                "${selectedSongIds.size} Selected",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent
+                    ),
+                    title = {
+                        Text(
+                            "Favorites",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF333333)
                             )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
-                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = {
-                                val count = selectedSongIds.size
-                                viewModel.deleteSelectedItems()
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Deleted $count items")
-                                }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
-                            }
-                        }
-                    )
-                } else {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.Transparent
-                        ),
-                        title = {
-                            Text(
-                                "Favorites",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF333333)
-                                )
-                            )
-                        }
-                    )
-                }
+                        )
+                    }
+                )
             }
         ) { padding ->
             if (favoriteSongs.isEmpty()) {
@@ -158,6 +132,58 @@ fun FavoritesScreen(
                             },
                             selectionMode = isSelectionMode
                         )
+                    }
+                }
+            }
+        }
+
+        // Selection Top Bar Overlay
+        AnimatedVisibility(
+            visible = isSelectionMode,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.zIndex(10f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(12.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = Color.White.copy(alpha = 0.85f),
+                tonalElevation = 8.dp,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242))
+                    }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    Text(
+                        text = "${selectedSongIds.size} Selected",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF333333)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    IconButton(onClick = {
+                        val count = selectedSongIds.size
+                        viewModel.deleteSelectedItems()
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Deleted $count items")
+                        }
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
                     }
                 }
             }

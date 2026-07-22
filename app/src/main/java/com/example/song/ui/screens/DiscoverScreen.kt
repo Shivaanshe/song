@@ -122,35 +122,7 @@ fun DiscoverScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                if (isSelectionMode) {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.White.copy(alpha = 0.4f)
-                        ),
-                        title = {
-                            Text(
-                                "${selectedStreamingIds.size} Selected",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
-                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = {
-                                val count = selectedStreamingIds.size
-                                viewModel.deleteSelectedItems()
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Deleted $count items")
-                                }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
-                            }
-                        }
-                    )
-                } else if (selectedPlaylist != null) {
+                if (selectedPlaylist != null) {
                     CenterAlignedTopAppBar(
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                             containerColor = Color.Transparent
@@ -797,6 +769,58 @@ fun DiscoverScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Selection Top Bar Overlay
+        AnimatedVisibility(
+            visible = isSelectionMode,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.zIndex(10f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(12.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = Color.White.copy(alpha = 0.85f),
+                tonalElevation = 8.dp,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242))
+                    }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    Text(
+                        text = "${selectedStreamingIds.size} Selected",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF333333)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    IconButton(onClick = {
+                        val count = selectedStreamingIds.size
+                        viewModel.deleteSelectedItems()
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Deleted $count items")
+                        }
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
                     }
                 }
             }

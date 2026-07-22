@@ -102,12 +102,15 @@ class MusicService : MediaSessionService() {
 
     private fun resolveNearbyItems() {
         val currentIndex = player.currentMediaItemIndex
-        
+        val totalItems = player.mediaItemCount
+        if (totalItems == 0) return
+
         // Items to resolve: Current + 1, Current + 2, and Previous (Current - 1)
         val indicesToResolve = listOf(currentIndex + 1, currentIndex + 2, currentIndex - 1)
         
         for (index in indicesToResolve) {
-            if (index >= 0 && index < player.mediaItemCount) {
+            // Safe boundary check
+            if (index in 0 until totalItems) {
                 val item = player.getMediaItemAt(index)
                 if (isYoutubePlaceholder(item)) {
                     resolveYoutubeUrl(item)

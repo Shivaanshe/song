@@ -135,106 +135,76 @@ fun LibraryScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                if (isSelectionMode) {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.White.copy(alpha = 0.4f)
-                        ),
-                        title = {
-                            Text(
-                                "${selectedSongIds.size} Selected",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
-                                Icon(Icons.Default.Close, contentDescription = "Cancel Selection")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { 
-                                val count = selectedSongIds.size
-                                viewModel.deleteSelectedItems() 
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Deleted $count items")
-                                }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
-                            }
-                        }
-                    )
-                } else {
-                    CenterAlignedTopAppBar(
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = Color.Transparent
-                        ),
-                        title = {
-                            if (isSearching) {
-                                TextField(
-                                    value = searchQuery,
-                                    onValueChange = { viewModel.setSearchQuery(it) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp),
-                                    placeholder = { Text("Search songs...") },
-                                    singleLine = true,
-                                    colors = TextFieldDefaults.colors(
-                                        focusedContainerColor = Color.White.copy(alpha = 0.2f),
-                                        unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
-                                        focusedIndicatorColor = Color.Transparent,
-                                        unfocusedIndicatorColor = Color.Transparent
-                                    ),
-                                    shape = RoundedCornerShape(24.dp),
-                                    trailingIcon = {
-                                        IconButton(onClick = { 
-                                            isSearching = false
-                                            viewModel.setSearchQuery("")
-                                        }) {
-                                            Icon(Icons.Default.Close, contentDescription = "Close search")
-                                        }
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent
+                    ),
+                    title = {
+                        if (isSearching) {
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                placeholder = { Text("Search songs...") },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.White.copy(alpha = 0.2f),
+                                    unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                trailingIcon = {
+                                    IconButton(onClick = { 
+                                        isSearching = false
+                                        viewModel.setSearchQuery("")
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close search")
                                     }
-                                )
-                            } else {
-                                Text(
-                                    "My Library",
-                                    style = MaterialTheme.typography.titleLarge.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF333333)
-                                    )
-                                )
-                            }
-                        },
-                        navigationIcon = {
-                            if (!isSearching) {
-                                IconButton(
-                                    onClick = { isSearching = true },
-                                    modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
                                 }
-                            }
-                        },
-                        actions = {
-                            if (!isSearching) {
-                                IconButton(
-                                    onClick = { showAddMenu = !showAddMenu },
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .background(Color.White.copy(alpha = 0.3f), CircleShape)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Add Options",
-                                        tint = Color(0xFF424242),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .rotate(addIconRotation)
-                                    )
-                                }
+                            )
+                        } else {
+                            Text(
+                                "My Library",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333)
+                                )
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (!isSearching) {
+                            IconButton(
+                                onClick = { isSearching = true },
+                                modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242))
                             }
                         }
-                    )
-                }
+                    },
+                    actions = {
+                        if (!isSearching) {
+                            IconButton(
+                                onClick = { showAddMenu = !showAddMenu },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color.White.copy(alpha = 0.3f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Options",
+                                    tint = Color(0xFF424242),
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .rotate(addIconRotation)
+                                )
+                            }
+                        }
+                    }
+                )
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
@@ -747,6 +717,58 @@ fun LibraryScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Selection Top Bar Overlay
+        AnimatedVisibility(
+            visible = isSelectionMode,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.zIndex(10f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(12.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = Color.White.copy(alpha = 0.85f),
+                tonalElevation = 8.dp,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242))
+                    }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    Text(
+                        text = "${selectedSongIds.size} Selected",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF333333)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    IconButton(onClick = {
+                        val count = selectedSongIds.size
+                        viewModel.deleteSelectedItems() 
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Deleted $count items")
+                        }
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
                     }
                 }
             }
