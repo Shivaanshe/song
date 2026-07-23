@@ -25,12 +25,11 @@ object YoutubeStreamHandler {
             val response = YoutubeDL.getInstance().execute(request)
             val output = response.out
             
-            val lines = output.trim().split("\n").filter { it.isNotBlank() }
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
 
-            // First pass: Find playlist item if it exists
-            for (line in lines) {
+            // First pass: Find playlist metadata using sequence to save memory
+            output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
                 try {
                     val json = JSONObject(line)
                     if (json.optString("_type") == "playlist") {
@@ -56,7 +55,7 @@ object YoutubeStreamHandler {
                             } else firstEntryThumb,
                             isPlaylist = true
                         )
-                        break
+                        return@forEach // Found playlist, move on
                     }
                 } catch (e: Exception) {}
             }
@@ -71,18 +70,10 @@ object YoutubeStreamHandler {
                 )
             }
 
-            // If we have multiple lines and no playlist item, but they aren't marked as playlist, 
-            // force a playlist container if there's more than 1 entry
-            if (playlistItem == null && lines.size > 1) {
-                playlistItem = StreamingItem(
-                    youtubeUrl = url,
-                    title = "YouTube Collection",
-                    thumbnailUrl = null,
-                    isPlaylist = true
-                )
-            }
-
-            for (line in lines) {
+            // Second pass: Process videos using sequence
+            var lineCount = 0
+            output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
+                lineCount++
                 try {
                     val json = JSONObject(line)
                     val type = json.optString("_type", "video")
@@ -127,6 +118,20 @@ object YoutubeStreamHandler {
                 }
             }
 
+            // Logic check: force a playlist container if there's more than 1 entry and no playlistItem yet
+            if (playlistItem == null && items.size > 1) {
+                playlistItem = StreamingItem(
+                    youtubeUrl = url,
+                    title = "YouTube Collection",
+                    thumbnailUrl = items.firstOrNull()?.thumbnailUrl,
+                    isPlaylist = true
+                )
+                // Update parent links for the items we already collected
+                val finalPlaylistUrl = playlistItem.youtubeUrl
+                val updatedItems = items.map { it.copy(parentPlaylistUrl = finalPlaylistUrl) }
+                items.clear()
+                items.addAll(updatedItems)
+            }
             
             val result = mutableListOf<StreamingItem>()
             if (playlistItem != null) {
@@ -134,26 +139,29 @@ object YoutubeStreamHandler {
             }
             result.addAll(items)
             
-            if (result.isEmpty() && lines.isNotEmpty()) {
+            if (result.isEmpty() && lineCount > 0) {
                 // Fallback for single video if not caught by loop
                 try {
-                    val json = JSONObject(lines[0])
-                    val id = json.optString("id")
-                    if (id.isNotEmpty()) {
-                        val thumb = if (json.has("thumbnail")) {
-                            json.getString("thumbnail")
-                        } else if (json.has("thumbnails")) {
-                            val thumbnails = json.getJSONArray("thumbnails")
-                            if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
-                        } else null
-                        
-                        result.add(StreamingItem(
-                            youtubeUrl = json.optString("webpage_url", url),
-                            title = json.optString("title", "Unknown Title"),
-                            thumbnailUrl = thumb,
-                            isPlaylist = false,
-                            duration = json.optLong("duration", 0L) * 1000L
-                        ))
+                    val firstLine = output.lineSequence().filter { it.isNotBlank() }.firstOrNull()
+                    if (firstLine != null) {
+                        val json = JSONObject(firstLine)
+                        val id = json.optString("id")
+                        if (id.isNotEmpty()) {
+                            val thumb = if (json.has("thumbnail")) {
+                                json.getString("thumbnail")
+                            } else if (json.has("thumbnails")) {
+                                val thumbnails = json.getJSONArray("thumbnails")
+                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
+                            } else null
+                            
+                            result.add(StreamingItem(
+                                youtubeUrl = json.optString("webpage_url", url),
+                                title = json.optString("title", "Unknown Title"),
+                                thumbnailUrl = thumb,
+                                isPlaylist = false,
+                                duration = json.optLong("duration", 0L) * 1000L
+                            ))
+                        }
                     }
                 } catch (e: Exception) {}
             }
