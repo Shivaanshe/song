@@ -12,6 +12,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.example.song.data.api.SpotifyResponse
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
@@ -161,19 +162,38 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             _isExtracting.value = true
             _extractionError.value = null
             try {
-                val items = YoutubeStreamHandler.getMetadata(url)
+                var spotifyMeta: SpotifyResponse? = null
+                val finalUrl = if (url.contains("spotify.com")) {
+                    try {
+                        val meta = repository.resolveSpotifyMetadata(url)
+                        spotifyMeta = meta
+                        "ytsearch1:${meta.artist} - ${meta.title}"
+                    } catch (e: Exception) {
+                        url 
+                    }
+                } else url
+
+                val items = YoutubeStreamHandler.getMetadata(finalUrl)
                 if (items.isEmpty()) {
-                    _extractionError.value = "No videos found in this URL"
+                    _extractionError.value = if (url.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
                     return@launch
                 }
 
+                // If it was a Spotify link, enrichment: use Spotify's cleaner metadata
+                val processedItems = if (spotifyMeta != null) {
+                    items.map { it.copy(
+                        title = spotifyMeta.title,
+                        thumbnailUrl = spotifyMeta.thumbnailUrl ?: it.thumbnailUrl
+                    )}
+                } else items
+
                 val hasPlaylistId = url.contains("list=")
-                if (items.size == 1 && !items[0].isPlaylist && !hasPlaylistId) {
+                if (processedItems.size == 1 && !processedItems[0].isPlaylist && !hasPlaylistId) {
                     // Single video without a playlist ID, add immediately
-                    repository.insertStreamingItems(items)
+                    repository.insertStreamingItems(processedItems)
                 } else {
                     // Playlist, multiple items, or URL with list=, show choice
-                    _pendingStreamingItems.value = items
+                    _pendingStreamingItems.value = processedItems
                 }
             } catch (e: Exception) {
                 _extractionError.value = "Extraction failed: ${e.localizedMessage}"
@@ -608,21 +628,47 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isExtracting.value = true
             try {
-                // Sanitize: If it has list=, force playlist mode
-                val sanitizedUrl = if (url.contains("list=")) {
+                var spotifyMeta: SpotifyResponse? = null
+                val finalUrl = if (url.contains("spotify.com")) {
+                    try {
+                        val meta = repository.resolveSpotifyMetadata(url)
+                        spotifyMeta = meta
+                        "ytsearch1:${meta.artist} - ${meta.title}"
+                    } catch (e: Exception) {
+                        url
+                    }
+                } else if (url.contains("list=")) {
                     val listId = url.substringAfter("list=").substringBefore("&")
                     "https://www.youtube.com/playlist?list=$listId"
                 } else url
 
-                val items = YoutubeStreamHandler.getMetadata(sanitizedUrl)
+                val items = YoutubeStreamHandler.getMetadata(finalUrl)
+                
+                if (items.isEmpty()) {
+                    if (url.contains("spotify.com")) {
+                         _downloadState.value = DownloadState.Error("Could not find this track on YouTube")
+                         delay(3000)
+                         _downloadState.value = DownloadState.Idle
+                    }
+                    return@launch
+                }
+
+                // If it was a Spotify link, enrichment: use Spotify's cleaner metadata
+                val processedItems = if (spotifyMeta != null) {
+                    items.map { it.copy(
+                        title = spotifyMeta.title,
+                        thumbnailUrl = spotifyMeta.thumbnailUrl ?: it.thumbnailUrl
+                    )}
+                } else items
+
                 val hasPlaylistId = url.contains("list=")
                 
-                if (items.size == 1 && !items[0].isPlaylist && !hasPlaylistId) {
+                if (processedItems.size == 1 && !processedItems[0].isPlaylist && !hasPlaylistId) {
                     // Single video without playlist ID, download immediately
-                    downloadFromYoutube(items[0].youtubeUrl)
+                    downloadFromYoutube(processedItems[0].youtubeUrl)
                 } else {
                     // Playlist, multiple items, or URL with list=, show choice
-                    _pendingDownloadItems.value = items
+                    _pendingDownloadItems.value = processedItems
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -3,6 +3,7 @@ package com.example.song.data.repository
 import com.example.song.data.dao.StreamingDao
 import com.example.song.data.model.StreamingItem
 import com.example.song.data.api.ITunesService
+import com.example.song.data.api.SpotifyService
 import com.example.song.data.dao.PlaylistDao
 import com.example.song.data.dao.SongDao
 import com.example.song.data.model.Playlist
@@ -38,6 +39,14 @@ class SongRepository(
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(ITunesService::class.java)
+    }
+
+    private val spotifyService: SpotifyService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://open.spotify.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(SpotifyService::class.java)
     }
 
     private var downloadJob: Job? = null
@@ -154,6 +163,10 @@ class SongRepository(
 
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>> {
         return playlistDao.getSongsInPlaylist(playlistId)
+    }
+
+    suspend fun resolveSpotifyMetadata(url: String) = withContext(Dispatchers.IO) {
+        spotifyService.getMetadata(url)
     }
 
     fun cancelDownload() {
