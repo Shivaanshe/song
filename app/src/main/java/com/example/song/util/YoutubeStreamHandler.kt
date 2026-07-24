@@ -13,158 +13,88 @@ object YoutubeStreamHandler {
 
     suspend fun getMetadata(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
         try {
+            val isCollectionUrl = url.contains("list=") || url.contains("/playlist/") || url.contains("/album/")
+            val isSpotifyUrl = url.contains("spotify.com")
+            
             val request = YoutubeDLRequest(url).apply {
                 addOption("--dump-json")
                 addOption("--flat-playlist")
-                addOption("--yes-playlist")
                 addOption("--no-check-certificate")
-                // For Mix/Radio URLs, we often need to limit the count or it might hang forever
+                addOption("--no-cache-dir")
+                
+                if (!isCollectionUrl) {
+                    addOption("--no-playlist")
+                }
+                
                 addOption("--playlist-end", "50") 
             }
             
             val response = YoutubeDL.getInstance().execute(request)
             val output = response.out
+            Log.d(TAG, "Fetched metadata for $url. Output length: ${output.length}")
             
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
 
-            // First pass: Find playlist metadata using sequence to save memory
             output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
                 try {
                     val json = JSONObject(line)
-                    if (json.optString("_type") == "playlist") {
-                        val playlistEntries = json.optJSONArray("entries")
-                        val firstEntryThumb = if (playlistEntries != null && playlistEntries.length() > 0) {
-                            val first = playlistEntries.getJSONObject(0)
-                            if (first.has("thumbnail")) {
-                                first.getString("thumbnail")
-                            } else if (first.has("thumbnails")) {
-                                val thumbs = first.getJSONArray("thumbnails")
-                                if (thumbs.length() > 0) thumbs.getJSONObject(0).getString("url") else null
-                            } else null
-                        } else null
-
-                        playlistItem = StreamingItem(
-                            youtubeUrl = json.optString("webpage_url", url),
-                            title = json.optString("title", "Playlist"),
-                            thumbnailUrl = if (json.has("thumbnail")) {
-                                json.getString("thumbnail")
-                            } else if (json.has("thumbnails")) {
-                                val thumbnails = json.getJSONArray("thumbnails")
-                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else firstEntryThumb
-                            } else firstEntryThumb,
-                            isPlaylist = true
-                        )
-                        return@forEach // Found playlist, move on
-                    }
-                } catch (e: Exception) {}
-            }
-
-            // If no playlist item found but URL has list=, try to infer it might be a playlist
-            if (playlistItem == null && url.contains("list=")) {
-                playlistItem = StreamingItem(
-                    youtubeUrl = url,
-                    title = "YouTube Mix",
-                    thumbnailUrl = null,
-                    isPlaylist = true
-                )
-            }
-
-            // Second pass: Process videos using sequence
-            var lineCount = 0
-            output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
-                lineCount++
-                try {
-                    val json = JSONObject(line)
-                    val type = json.optString("_type", "video")
+                    val type = json.optString("_type")
                     
-                    if (type != "playlist") {
-                        val id = json.optString("id")
-                        if (id.isNotEmpty()) {
-                            val title = json.optString("title", "Unknown Title")
-                            val thumb = if (json.has("thumbnail")) {
-                                json.getString("thumbnail")
-                            } else if (json.has("thumbnails")) {
-                                val thumbnails = json.getJSONArray("thumbnails")
-                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
-                            } else null
-                            val duration = json.optLong("duration", 0L)
-                            
-                            // Update playlist metadata from the first valid video if needed
-                            if (playlistItem != null) {
-                                if (playlistItem.thumbnailUrl == null && thumb != null) {
-                                    playlistItem = playlistItem.copy(thumbnailUrl = thumb)
-                                }
-                                if (playlistItem.title == "YouTube Mix" || playlistItem.title == "YouTube Collection") {
-                                    val playlistTitle = json.optString("playlist_title")
-                                    if (playlistTitle.isNotEmpty()) {
-                                        playlistItem = playlistItem.copy(title = playlistTitle)
-                                    }
-                                }
-                            }
+                    if (type == "playlist") {
+                        val playlistTitle = json.optString("title", "Playlist")
+                        val playlistUrl = json.optString("webpage_url", url)
+                        val playlistThumb = extractThumbnail(json)
 
-                            items.add(StreamingItem(
-                                youtubeUrl = if (json.has("webpage_url")) json.getString("webpage_url") else "https://www.youtube.com/watch?v=$id",
-                                title = title,
-                                thumbnailUrl = thumb,
-                                isPlaylist = false,
-                                parentPlaylistUrl = playlistItem?.youtubeUrl,
-                                duration = duration * 1000L
-                            ))
+                        if (playlistItem == null) {
+                            playlistItem = StreamingItem(
+                                youtubeUrl = playlistUrl,
+                                title = playlistTitle,
+                                thumbnailUrl = playlistThumb,
+                                isPlaylist = true
+                            )
+                        }
+
+                        val entries = json.optJSONArray("entries")
+                        if (entries != null) {
+                            for (i in 0 until entries.length()) {
+                                try {
+                                    val entry = entries.getJSONObject(i)
+                                    parseJsonToStreamingItem(entry, isSpotifyUrl, playlistItem)?.let { items.add(it) }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } else {
+                        parseJsonToStreamingItem(json, isSpotifyUrl, playlistItem)?.let { entryItem ->
+                            if (items.none { it.youtubeUrl == entryItem.youtubeUrl }) {
+                                items.add(entryItem)
+                            }
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing line: $e")
-                }
+                } catch (_: Exception) {}
             }
 
-            // Logic check: force a playlist container if there's more than 1 entry and no playlistItem yet
-            if (playlistItem == null && items.size > 1) {
+            if (playlistItem == null && isCollectionUrl) {
                 playlistItem = StreamingItem(
                     youtubeUrl = url,
-                    title = "YouTube Collection",
+                    title = if (isSpotifyUrl) "Spotify Collection" else "YouTube Collection",
                     thumbnailUrl = items.firstOrNull()?.thumbnailUrl,
                     isPlaylist = true
                 )
-                // Update parent links for the items we already collected
-                val finalPlaylistUrl = playlistItem.youtubeUrl
-                val updatedItems = items.map { it.copy(parentPlaylistUrl = finalPlaylistUrl) }
+                val finalUrl = playlistItem.youtubeUrl
+                val updated = items.map { it.copy(parentPlaylistUrl = finalUrl) }
                 items.clear()
-                items.addAll(updatedItems)
+                items.addAll(updated)
             }
-            
+
             val result = mutableListOf<StreamingItem>()
             if (playlistItem != null) {
+                if (playlistItem.thumbnailUrl == null && items.isNotEmpty()) {
+                    playlistItem = playlistItem.copy(thumbnailUrl = items.first().thumbnailUrl)
+                }
                 result.add(playlistItem)
             }
             result.addAll(items)
-            
-            if (result.isEmpty() && lineCount > 0) {
-                // Fallback for single video if not caught by loop
-                try {
-                    val firstLine = output.lineSequence().filter { it.isNotBlank() }.firstOrNull()
-                    if (firstLine != null) {
-                        val json = JSONObject(firstLine)
-                        val id = json.optString("id")
-                        if (id.isNotEmpty()) {
-                            val thumb = if (json.has("thumbnail")) {
-                                json.getString("thumbnail")
-                            } else if (json.has("thumbnails")) {
-                                val thumbnails = json.getJSONArray("thumbnails")
-                                if (thumbnails.length() > 0) thumbnails.getJSONObject(0).getString("url") else null
-                            } else null
-                            
-                            result.add(StreamingItem(
-                                youtubeUrl = json.optString("webpage_url", url),
-                                title = json.optString("title", "Unknown Title"),
-                                thumbnailUrl = thumb,
-                                isPlaylist = false,
-                                duration = json.optLong("duration", 0L) * 1000L
-                            ))
-                        }
-                    }
-                } catch (e: Exception) {}
-            }
             
             return@withContext result
         } catch (e: Exception) {
@@ -173,14 +103,67 @@ object YoutubeStreamHandler {
         }
     }
 
+    private fun extractThumbnail(json: JSONObject): String? {
+        return if (json.has("thumbnail")) {
+            json.getString("thumbnail")
+        } else if (json.has("thumbnails")) {
+            val thumbnails = json.getJSONArray("thumbnails")
+            if (thumbnails.length() > 0) thumbnails.getJSONObject(thumbnails.length() - 1).getString("url") else null
+        } else null
+    }
+
+    private fun parseJsonToStreamingItem(json: JSONObject, isSpotifySource: Boolean, playlist: StreamingItem?): StreamingItem? {
+        val id = json.optString("id")
+        val title = json.optString("title")
+        val webUrl = json.optString("webpage_url")
+        val url = json.optString("url")
+        
+        if (id.isEmpty() && title.isEmpty() && webUrl.isEmpty() && url.isEmpty()) return null
+
+        val artist = json.optString("artist") ?: json.optString("uploader") ?: json.optString("channel") ?: "Unknown Artist"
+        
+        val finalUrl = when {
+            id.isNotEmpty() -> if (webUrl.isNotEmpty()) webUrl else "https://www.youtube.com/watch?v=$id"
+            webUrl.isNotEmpty() -> webUrl
+            url.isNotEmpty() && url.startsWith("http") -> url
+            isSpotifySource && title.isNotEmpty() -> "ytsearch1:$title $artist"
+            else -> null
+        } ?: return null
+
+        val thumb = extractThumbnail(json) ?: playlist?.thumbnailUrl
+
+        val duration = json.optLong("duration", 0L)
+
+        return StreamingItem(
+            youtubeUrl = finalUrl,
+            title = if (title.isEmpty()) "Unknown Title" else title,
+            thumbnailUrl = thumb,
+            isPlaylist = false,
+            parentPlaylistUrl = playlist?.youtubeUrl,
+            duration = duration * 1000L
+        )
+    }
+
     suspend fun getDirectAudioUrl(youtubeUrl: String): String? = withContext(Dispatchers.IO) {
         try {
-            val request = YoutubeDLRequest(youtubeUrl).apply {
+            val actualUrl = if (youtubeUrl.startsWith("ytsearch")) {
+                val results = getMetadata(youtubeUrl)
+                results.find { !it.isPlaylist }?.youtubeUrl
+            } else {
+                youtubeUrl
+            }
+
+            if (actualUrl == null || actualUrl.startsWith("ytsearch")) return@withContext null
+
+            val request = YoutubeDLRequest(actualUrl).apply {
                 addOption("-f", "bestaudio")
                 addOption("-g")
+                addOption("--no-check-certificate")
+                addOption("--no-cache-dir")
+                addOption("--no-playlist")
             }
             val response = YoutubeDL.getInstance().execute(request)
-            return@withContext response.out.trim()
+            return@withContext response.out.trim().takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting direct audio URL: ${e.message}", e)
             null

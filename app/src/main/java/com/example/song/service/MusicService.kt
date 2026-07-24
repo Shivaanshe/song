@@ -95,9 +95,15 @@ class MusicService : MediaSessionService() {
 
     private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
         val uriString = mediaItem.localConfiguration?.uri.toString()
-        return (uriString.startsWith("http") && 
+        // Standard YouTube links
+        val isStandardPlaceholder = (uriString.startsWith("http") && 
                 (uriString.contains("youtube.com") || uriString.contains("youtu.be"))) && 
                 !uriString.contains("googlevideo.com")
+        
+        // Spotify bridged search links
+        val isSearchPlaceholder = uriString.startsWith("ytsearch")
+        
+        return isStandardPlaceholder || isSearchPlaceholder
     }
 
     private fun resolveNearbyItems() {
@@ -135,6 +141,7 @@ class MusicService : MediaSessionService() {
                 val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") 
                     ?: mediaItem.localConfiguration?.uri.toString()
 
+                android.util.Log.d("MusicService", "Resolving placeholder URL: $youtubeUrl")
                 val directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
                 
                 if (directUrl != null) {

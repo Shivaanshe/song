@@ -1,6 +1,7 @@
 package com.example.song.viewmodel
 
 import android.app.Application
+import android.util.Log
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
@@ -167,19 +168,28 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         val meta = repository.resolveSpotifyMetadata(url)
                         spotifyMeta = meta
-                        "ytsearch1:${meta.artist} - ${meta.title}"
+                        
+                        val query = if (url.contains("/track/")) {
+                            "${meta.artist} - ${meta.title}"
+                        } else {
+                            // Album or Playlist - search for the title as a playlist candidate
+                            "${meta.title} playlist"
+                        }
+                        "ytsearch1:$query"
                     } catch (e: Exception) {
                         url 
                     }
                 } else url
 
                 val items = YoutubeStreamHandler.getMetadata(finalUrl)
+                Log.d("SongViewModel", "Extraction results for $finalUrl: ${items.size} items")
+                
                 if (items.isEmpty()) {
                     _extractionError.value = if (url.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
                     return@launch
                 }
 
-                // If it was a Spotify link, enrichment: use Spotify's cleaner metadata
+                // Enrichment for Spotify
                 val processedItems = if (spotifyMeta != null) {
                     items.map { it.copy(
                         title = spotifyMeta.title,
@@ -187,16 +197,23 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     )}
                 } else items
 
-                val hasPlaylistId = url.contains("list=")
-                if (processedItems.size == 1 && !processedItems[0].isPlaylist && !hasPlaylistId) {
-                    // Single video without a playlist ID, add immediately
+                // Identify collection if it has multiple items OR is explicitly a playlist URL
+                val isCollection = processedItems.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
+                
+                if (processedItems.size == 1 && !isCollection) {
+                    // Single track, add immediately
                     repository.insertStreamingItems(processedItems)
                 } else {
-                    // Playlist, multiple items, or URL with list=, show choice
+                    // Playlist, multiple items, or collection, show choice
                     _pendingStreamingItems.value = processedItems
                 }
             } catch (e: Exception) {
-                _extractionError.value = "Extraction failed: ${e.localizedMessage}"
+                val errorMsg = e.localizedMessage ?: ""
+                _extractionError.value = when {
+                    errorMsg.contains("429") -> "YouTube is rate-limiting requests. Please try again in a few minutes."
+                    errorMsg.contains("confirm you're not a bot") -> "Bot detection triggered. Try a different link or wait."
+                    else -> "Extraction failed: $errorMsg"
+                }
                 e.printStackTrace()
             } finally {
                 _isExtracting.value = false
@@ -279,7 +296,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        android.util.Log.e("SongViewModel", "Playback error: ${error.message}", error)
+                        Log.e("SongViewModel", "Playback error: ${error.message}", error)
                         _playbackError.value = "Playback Error: ${error.localizedMessage}"
                         _isPlaying.value = false
                     }
@@ -550,9 +567,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             val directUrl = YoutubeStreamHandler.getDirectAudioUrl(item.youtubeUrl)
             _resolvingUrlId.value = null
             
-            if (directUrl == null) return@launch
+            if (directUrl == null) {
+                _playbackError.value = "Could not resolve audio link."
+                return@launch
+            }
 
             val filteredQueue = queue.filter { !it.isPlaylist }
+            val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+            
+            // Set the first item with a direct URL, the rest as placeholders
             val mediaItems = filteredQueue.map { qItem ->
                 if (qItem.id == item.id) {
                     qItem.toMediaItem(directUrl)
@@ -560,18 +583,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     qItem.toMediaItem()
                 }
             }
-            val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-            
-            val streamingSong = Song(
-                id = item.id,
-                title = item.title,
-                artist = "YouTube",
-                audioUri = item.youtubeUrl,
-                imageUrl = item.thumbnailUrl,
-                duration = item.duration
-            )
-            _currentPlayingSong.value = streamingSong
-            _isPlaying.value = true
 
             _currentQueue.value = filteredQueue.map {
                 Song(
@@ -583,7 +594,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     duration = it.duration
                 )
             }
-            
+            _currentPlayingSong.value = _currentQueue.value.getOrNull(index)
+            _isPlaying.value = true
+
             mediaController?.apply {
                 val currentMode = repeatMode
                 setMediaItems(mediaItems, index, 0L)
@@ -633,7 +646,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         val meta = repository.resolveSpotifyMetadata(url)
                         spotifyMeta = meta
-                        "ytsearch1:${meta.artist} - ${meta.title}"
+                        
+                        val query = if (url.contains("/track/")) {
+                            "${meta.artist} - ${meta.title}"
+                        } else {
+                            "${meta.title} playlist"
+                        }
+                        "ytsearch1:$query"
                     } catch (e: Exception) {
                         url
                     }
@@ -653,7 +672,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // If it was a Spotify link, enrichment: use Spotify's cleaner metadata
+                // Enrichment for Spotify
                 val processedItems = if (spotifyMeta != null) {
                     items.map { it.copy(
                         title = spotifyMeta.title,
@@ -661,13 +680,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     )}
                 } else items
 
-                val hasPlaylistId = url.contains("list=")
+                // Identify collection
+                val isCollection = processedItems.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
-                if (processedItems.size == 1 && !processedItems[0].isPlaylist && !hasPlaylistId) {
-                    // Single video without playlist ID, download immediately
+                if (processedItems.size == 1 && !isCollection) {
+                    // Single track, download immediately
                     downloadFromYoutube(processedItems[0].youtubeUrl)
                 } else {
-                    // Playlist, multiple items, or URL with list=, show choice
+                    // Playlist, multiple items, or collection, show choice
                     _pendingDownloadItems.value = processedItems
                 }
             } catch (e: Exception) {
