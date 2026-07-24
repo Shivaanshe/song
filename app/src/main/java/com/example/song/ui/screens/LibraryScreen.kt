@@ -77,7 +77,8 @@ fun LibraryScreen(
     var newPlaylistName by remember { mutableStateOf("") }
     var youtubeUrl by remember { mutableStateOf("") }
     val isUrlValid = remember(youtubeUrl) { 
-        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")))
+        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && 
+            (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com")))
     }
 
     val addIconRotation by animateFloatAsState(
@@ -443,7 +444,7 @@ fun LibraryScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFFE91E63))
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Download from YT")
+                        Text("Import from Link")
                     }
                 },
                 text = {
@@ -459,7 +460,7 @@ fun LibraryScreen(
                             }
                         } else {
                             Text(
-                                "Enter the YouTube video URL to extract and download audio.",
+                                "Enter a YouTube or Spotify URL to extract and download audio.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
@@ -482,7 +483,7 @@ fun LibraryScreen(
 
                             if (!isUrlValid && youtubeUrl.isNotBlank()) {
                                 Text(
-                                    "Invalid YouTube URL",
+                                    "Invalid URL (YouTube or Spotify only)",
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(top = 4.dp, start = 8.dp)

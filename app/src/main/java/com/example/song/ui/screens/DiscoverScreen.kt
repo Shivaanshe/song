@@ -79,7 +79,8 @@ fun DiscoverScreen(
     var selectedPlaylist by remember { mutableStateOf<StreamingItem?>(null) }
 
     val isUrlValid = remember(youtubeUrl) {
-        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be")))
+        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && 
+            (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com")))
     }
 
     val addIconRotation by animateFloatAsState(
@@ -506,7 +507,7 @@ fun DiscoverScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFFE91E63))
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Stream from YT")
+                        Text("Stream from Link")
                     }
                 },
                 text = {
@@ -522,7 +523,7 @@ fun DiscoverScreen(
                             }
                         } else {
                             Text(
-                                "Enter the YouTube video or playlist URL to add to your Discover list.",
+                                "Enter a YouTube or Spotify URL to add to your Discover list.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
@@ -545,7 +546,7 @@ fun DiscoverScreen(
 
                             if (!isUrlValid && youtubeUrl.isNotBlank()) {
                                 Text(
-                                    "Invalid YouTube URL",
+                                    "Invalid URL (YouTube or Spotify only)",
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.padding(top = 4.dp, start = 8.dp)
