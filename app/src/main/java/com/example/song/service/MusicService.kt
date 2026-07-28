@@ -13,6 +13,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.song.MainActivity
 import com.example.song.SongApplication
+import com.example.song.util.PulseLogger
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.*
 
@@ -60,6 +61,7 @@ class MusicService : MediaSessionService() {
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                PulseLogger.log("Player error: ${error.errorCodeName} - ${error.localizedMessage}", isError = true)
                 // If we hit a source error, try to re-resolve the current item
                 if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||

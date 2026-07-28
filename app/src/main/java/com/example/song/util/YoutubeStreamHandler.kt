@@ -2,6 +2,7 @@ package com.example.song.util
 
 import android.util.Log
 import com.example.song.data.model.StreamingItem
+import com.example.song.util.PulseLogger
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,7 @@ object YoutubeStreamHandler {
 
     suspend fun getMetadata(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
         try {
+            PulseLogger.updateTask("Initializing Engine...")
             val isCollectionUrl = url.contains("list=") || url.contains("/playlist/") || url.contains("/album/")
             val isSpotifyUrl = url.contains("spotify.com")
             
@@ -29,9 +31,12 @@ object YoutubeStreamHandler {
                 addOption("--playlist-end", "50") 
             }
             
+            PulseLogger.updateTask("Extracting Metadata...")
             val response = YoutubeDL.getInstance().execute(request)
             val output = response.out
             Log.d(TAG, "Fetched metadata. Output length: ${output.length}")
+            PulseLogger.updateTask("Parsing Results...")
+            PulseLogger.log("Extracted ${output.length} bytes metadata")
             
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
@@ -96,9 +101,12 @@ object YoutubeStreamHandler {
             }
             result.addAll(items)
             
+            PulseLogger.updateTask(null)
             return@withContext result
         } catch (e: Exception) {
+            PulseLogger.updateTask(null)
             Log.e(TAG, "Error fetching metadata: ${e.message}", e)
+            PulseLogger.log("Metadata error: ${e.localizedMessage}", isError = true)
             throw e
         }
     }
@@ -146,6 +154,8 @@ object YoutubeStreamHandler {
 
     suspend fun getDirectAudioUrl(youtubeUrl: String): String? = withContext(Dispatchers.IO) {
         try {
+            PulseLogger.updateTask("Resolving Bridge...")
+            PulseLogger.log("Resolving audio URL for: $youtubeUrl")
             val actualUrl = if (youtubeUrl.startsWith("ytsearch")) {
                 val results = getMetadata(youtubeUrl)
                 results.find { !it.isPlaylist }?.youtubeUrl
@@ -163,8 +173,10 @@ object YoutubeStreamHandler {
                 addOption("--no-playlist")
             }
             val response = YoutubeDL.getInstance().execute(request)
+            PulseLogger.updateTask(null)
             return@withContext response.out.trim().takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
+            PulseLogger.updateTask(null)
             Log.e(TAG, "Error getting direct audio URL: ${e.message}", e)
             null
         }

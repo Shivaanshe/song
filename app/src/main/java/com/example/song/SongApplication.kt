@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import com.yausername.ffmpeg.FFmpeg
@@ -11,6 +13,7 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -20,6 +23,9 @@ class SongApplication : Application() {
 
     private val _isReady = MutableStateFlow(false)
     val isReady = _isReady.asStateFlow()
+
+    private val _cachedKeys = MutableStateFlow<Set<String>>(emptySet())
+    val cachedKeys = _cachedKeys.asStateFlow()
 
     @androidx.media3.common.util.UnstableApi
     lateinit var playerCache: SimpleCache
@@ -34,6 +40,17 @@ class SongApplication : Application() {
         val evictor = LeastRecentlyUsedCacheEvictor(300 * 1024 * 1024L) // 300MB
         val databaseProvider = StandaloneDatabaseProvider(this)
         playerCache = SimpleCache(File(cacheDir, "media_cache"), evictor, databaseProvider)
+        
+        // Polling approach to avoid listener API version conflicts
+        CoroutineScope(Dispatchers.IO).launch {
+            while (true) {
+                val keys = try { playerCache.keys } catch (e: Exception) { emptySet() }
+                if (_cachedKeys.value != keys) {
+                    _cachedKeys.value = keys
+                }
+                delay(2000) // Poll every 2 seconds
+            }
+        }
     }
 
     @androidx.media3.common.util.UnstableApi

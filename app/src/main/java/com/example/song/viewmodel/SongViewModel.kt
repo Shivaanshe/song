@@ -20,6 +20,7 @@ import com.example.song.data.model.Song
 import com.example.song.data.model.StreamingItem
 import com.example.song.data.repository.SongRepository
 import com.example.song.service.MusicService
+import com.example.song.util.PulseLogger
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -92,6 +93,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _playbackError = MutableStateFlow<String?>(null)
     val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
+    val systemLogs: StateFlow<List<String>> = PulseLogger.logs
+    val currentTask: StateFlow<String?> = PulseLogger.currentTask
+    val cachedKeys: StateFlow<Set<String>> = com.example.song.SongApplication.getInstance().cachedKeys
 
     private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
@@ -837,8 +842,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateTask(task: String?) {
+        PulseLogger.updateTask(task)
+    }
+
     fun clearPlaybackError() {
         _playbackError.value = null
+        PulseLogger.clear()
     }
 
     override fun onCleared() {
