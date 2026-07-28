@@ -22,7 +22,7 @@ object YoutubeStreamHandler {
                 addOption("--no-check-certificate")
                 addOption("--no-cache-dir")
                 
-                if (!isCollectionUrl) {
+                if (!isCollectionUrl && !url.startsWith("ytsearch")) {
                     addOption("--no-playlist")
                 }
                 
@@ -31,7 +31,7 @@ object YoutubeStreamHandler {
             
             val response = YoutubeDL.getInstance().execute(request)
             val output = response.out
-            Log.d(TAG, "Fetched metadata for $url. Output length: ${output.length}")
+            Log.d(TAG, "Fetched metadata. Output length: ${output.length}")
             
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
@@ -41,8 +41,8 @@ object YoutubeStreamHandler {
                     val json = JSONObject(line)
                     val type = json.optString("_type")
                     
-                    if (type == "playlist") {
-                        val playlistTitle = json.optString("title", "Playlist")
+                    if (type == "playlist" || type == "multi_video") {
+                        val playlistTitle = json.optString("title", "Collection")
                         val playlistUrl = json.optString("webpage_url", url)
                         val playlistThumb = extractThumbnail(json)
 

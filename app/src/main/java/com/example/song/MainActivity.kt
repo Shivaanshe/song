@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.song.ui.components.DebugOverlay
 import com.example.song.ui.components.NowPlayingBar
 import com.example.song.ui.screens.LibraryScreen
 import com.example.song.ui.screens.PlayerScreen
@@ -125,57 +126,62 @@ fun MainApp(viewModel: SongViewModel) {
                 }
             }
         ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = "library",
-                modifier = Modifier.padding(
-                    if (currentDestination?.route == "player") PaddingValues() 
-                    else innerPadding
-                )
-            ) {
-                composable("library") {
-                    LibraryScreen(
-                        viewModel = viewModel,
-                        onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
-                        onFavoritesClick = { navController.navigate("favorites") },
-                        onSongClick = { navController.navigate("player") }
+            Box(modifier = Modifier.fillMaxSize()) {
+                NavHost(
+                    navController = navController,
+                    startDestination = "library",
+                    modifier = Modifier.padding(
+                        if (currentDestination?.route == "player") PaddingValues() 
+                        else innerPadding
                     )
+                ) {
+                    composable("library") {
+                        LibraryScreen(
+                            viewModel = viewModel,
+                            onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                            onFavoritesClick = { navController.navigate("favorites") },
+                            onSongClick = { navController.navigate("player") }
+                        )
+                    }
+                    composable("favorites") {
+                        com.example.song.ui.screens.FavoritesScreen(
+                            viewModel = viewModel,
+                            onSongClick = { navController.navigate("player") }
+                        )
+                    }
+                    composable("discover") {
+                        com.example.song.ui.screens.DiscoverScreen(
+                            viewModel = viewModel,
+                            onSongClick = { navController.navigate("player") }
+                        )
+                    }
+                    composable(
+                        "playlist/{playlistId}/{playlistName}",
+                        arguments = listOf(
+                            navArgument("playlistId") { type = NavType.IntType },
+                            navArgument("playlistName") { type = NavType.StringType }
+                        )
+                    ) { backStackEntry ->
+                        val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
+                        val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
+                        PlaylistDetailScreen(
+                            playlistId = playlistId,
+                            playlistName = playlistName,
+                            viewModel = viewModel,
+                            onBackClick = { navController.popBackStack() },
+                            onSongClick = { navController.navigate("player") }
+                        )
+                    }
+                    composable("player") {
+                        PlayerScreen(
+                            viewModel = viewModel,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
                 }
-                composable("favorites") {
-                    com.example.song.ui.screens.FavoritesScreen(
-                        viewModel = viewModel,
-                        onSongClick = { navController.navigate("player") }
-                    )
-                }
-                composable("discover") {
-                    com.example.song.ui.screens.DiscoverScreen(
-                        viewModel = viewModel,
-                        onSongClick = { navController.navigate("player") }
-                    )
-                }
-                composable(
-                    "playlist/{playlistId}/{playlistName}",
-                    arguments = listOf(
-                        navArgument("playlistId") { type = NavType.IntType },
-                        navArgument("playlistName") { type = NavType.StringType }
-                    )
-                ) { backStackEntry ->
-                    val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
-                    val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
-                    PlaylistDetailScreen(
-                        playlistId = playlistId,
-                        playlistName = playlistName,
-                        viewModel = viewModel,
-                        onBackClick = { navController.popBackStack() },
-                        onSongClick = { navController.navigate("player") }
-                    )
-                }
-                composable("player") {
-                    PlayerScreen(
-                        viewModel = viewModel,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
+                
+                // Floating Debug Button on top of everything
+                DebugOverlay(viewModel)
             }
         }
     }
