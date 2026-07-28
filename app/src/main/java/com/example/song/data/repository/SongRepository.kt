@@ -165,6 +165,16 @@ class SongRepository(
         return playlistDao.getSongsInPlaylist(playlistId)
     }
 
+    suspend fun fetchArtwork(title: String, artist: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val query = "$title $artist"
+            val response = iTunesService.searchSong(query)
+            response.results.firstOrNull()?.artworkUrl100?.replace("100x100bb", "500x500bb")
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun resolveSpotifyMetadata(url: String) = withContext(Dispatchers.IO) {
         spotifyService.getMetadata(url)
     }

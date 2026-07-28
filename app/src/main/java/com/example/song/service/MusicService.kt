@@ -68,11 +68,12 @@ class MusicService : MediaSessionService() {
                     error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) {
                     
                     player.currentMediaItem?.let {
-                        // Only force re-resolve if it's a YouTube-sourced item
+                        // Only force re-resolve if it's a YouTube-sourced item or our placeholder
                         val uriString = it.localConfiguration?.uri.toString()
                         val isYoutubeSource = uriString.contains("youtube.com") || 
                                               uriString.contains("youtu.be") || 
-                                              uriString.contains("googlevideo.com")
+                                              uriString.contains("googlevideo.com") ||
+                                              uriString.startsWith("pulse_placeholder:")
                         
                         if (isYoutubeSource) {
                             android.util.Log.d("MusicService", "Source error detected for YouTube track. Attempting auto-recovery...")
@@ -97,15 +98,7 @@ class MusicService : MediaSessionService() {
 
     private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
         val uriString = mediaItem.localConfiguration?.uri.toString()
-        // Standard YouTube links
-        val isStandardPlaceholder = (uriString.startsWith("http") && 
-                (uriString.contains("youtube.com") || uriString.contains("youtu.be"))) && 
-                !uriString.contains("googlevideo.com")
-        
-        // Spotify bridged search links
-        val isSearchPlaceholder = uriString.startsWith("ytsearch")
-        
-        return isStandardPlaceholder || isSearchPlaceholder
+        return uriString.startsWith("pulse_placeholder:")
     }
 
     private fun resolveNearbyItems() {
@@ -140,8 +133,12 @@ class MusicService : MediaSessionService() {
                     return@launch
                 }
 
-                val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") 
-                    ?: mediaItem.localConfiguration?.uri.toString()
+                val uriString = mediaItem.localConfiguration?.uri.toString()
+                val youtubeUrl = if (uriString.startsWith("pulse_placeholder:")) {
+                    uriString.substringAfter("pulse_placeholder:")
+                } else {
+                    mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
+                }
 
                 android.util.Log.d("MusicService", "Resolving placeholder URL: $youtubeUrl")
                 val directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)

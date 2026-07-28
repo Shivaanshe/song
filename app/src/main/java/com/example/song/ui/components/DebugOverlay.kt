@@ -59,121 +59,143 @@ fun DebugOverlay(viewModel: SongViewModel) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(650.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xFF121212) // Deeper dark for high contrast
+                    .height(680.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xFF121212)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(20.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Pulse Debugger", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Pulse Debugger", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White)
                         IconButton(onClick = { showDialog = false }) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     LazyColumn(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(bottom = 16.dp)
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        contentPadding = PaddingValues(bottom = 20.dp)
                     ) {
+                        // Section 1: Engine Status
                         item {
                             DebugSection("Engine & Task Status") {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    DebugRow("Live Task", currentTask ?: "Idle")
-                                    DebugRow("Extracting", isExtracting.toString())
-                                    DebugRow("Resolving ID", resolvingId?.toString() ?: "None")
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    DebugRowFixed("Live Task", currentTask ?: "Idle", Color(0xFF81C784))
+                                    DebugRowFixed("Extracting", isExtracting.toString())
+                                    DebugRowFixed("Resolving ID", resolvingId?.toString() ?: "None")
                                     currentSong?.let {
-                                        DebugRow("Active Song", it.title)
+                                        DebugRowFixed("Active Song", it.title)
                                     }
                                 }
                             }
                         }
 
+                        // Section 2: Cache Monitor
                         item {
                             DebugSection("Cache Monitor (${cachedKeys.size} spans)") {
-                                Column(
-                                    modifier = Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .heightIn(max = 120.dp)
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(12.dp))
+                                        .padding(8.dp)
                                 ) {
                                     if (cachedKeys.isEmpty()) {
                                         Text("Cache is empty", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                     } else {
-                                        cachedKeys.forEach { key ->
-                                            Text(
-                                                text = "• $key",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                                color = Color(0xFF81C784),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
+                                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                            cachedKeys.forEach { key ->
+                                                Text(
+                                                    text = "• $key",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                                    color = Color(0xFF81C784),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
 
+                        // Section 3: Playback Queue
                         item {
                             DebugSection("Playback Queue (${currentQueue.size})") {
                                 Column(
-                                    modifier = Modifier.heightIn(max = 150.dp).verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    modifier = Modifier
+                                        .heightIn(max = 150.dp)
+                                        .verticalScroll(rememberScrollState())
+                                        .fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    if (playbackError != null) {
+                                        Text("ERROR: $playbackError", color = Color.Red, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    if (extractionError != null) {
+                                        Text("ERROR: $extractionError", color = Color.Red, style = MaterialTheme.typography.labelSmall)
+                                    }
                                     currentQueue.forEach { song ->
                                         val isPlaying = song.id == currentSong?.id
-                                        Text(
-                                            text = (if (isPlaying) "▶ " else "• ") + song.title,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isPlaying) Color(0xFF4CAF50) else Color.White.copy(alpha = 0.7f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        val isCached = cachedKeys.any { it.contains(song.audioUri) || (song.id.toString() in cachedKeys) }
+                                        
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = (if (isPlaying) "▶ " else "• "),
+                                                color = if (isPlaying) Color(0xFFE91E63) else Color.White.copy(alpha = 0.4f)
+                                            )
+                                            Text(
+                                                text = song.title,
+                                                modifier = Modifier.weight(1f),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isPlaying) Color.White else Color.White.copy(alpha = 0.7f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (isCached) {
+                                                Surface(
+                                                    color = Color(0xFF81C784).copy(alpha = 0.2f),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text("CACHED", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp), color = Color(0xFF81C784))
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        if (playbackError != null || extractionError != null) {
-                            item {
-                                DebugSection("Active Errors") {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        playbackError?.let {
-                                            Text("Playback: $it", style = MaterialTheme.typography.bodySmall, color = Color.Red)
-                                        }
-                                        extractionError?.let {
-                                            Text("Extraction: $it", style = MaterialTheme.typography.bodySmall, color = Color.Red)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
+                        // Section 4: System Logs
                         item {
-                            DebugSection("System Logs (Scrollable)") {
+                            DebugSection("System Logs (Live)") {
                                 Box(
                                     modifier = Modifier
                                         .height(200.dp)
                                         .fillMaxWidth()
-                                        .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                                        .padding(8.dp)
+                                        .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                                        .padding(10.dp)
                                 ) {
-                                    val logScrollState = rememberScrollState()
+                                    val verticalScrollState = rememberScrollState()
+                                    val horizontalScrollState = rememberScrollState()
+                                    
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .verticalScroll(logScrollState)
-                                            .horizontalScroll(rememberScrollState())
+                                            .verticalScroll(verticalScrollState)
+                                            .horizontalScroll(horizontalScrollState)
                                     ) {
                                         systemLogs.forEach { log ->
                                             Text(
                                                 text = log,
                                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                                color = if (log.contains("[ERROR]")) Color.Red else Color.Gray,
+                                                color = if (log.contains("[ERROR]")) Color(0xFFFF5252) else Color.Gray,
                                                 fontFamily = FontFamily.Monospace,
                                                 softWrap = false
                                             )
@@ -184,15 +206,15 @@ fun DebugOverlay(viewModel: SongViewModel) {
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
                         onClick = { viewModel.clearPlaybackError() },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333), contentColor = Color.White),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Text("Clear Logs & Errors")
+                        Text("Clear Logs & Errors", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -203,22 +225,22 @@ fun DebugOverlay(viewModel: SongViewModel) {
 @Composable
 fun DebugSection(title: String, content: @Composable () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(title, style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
-            .padding(12.dp)
-        ) {
-            content()
-        }
+        Text(title, style = MaterialTheme.typography.labelMedium, color = Color(0xFF81C784), fontWeight = FontWeight.ExtraBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        content()
     }
 }
 
 @Composable
-fun DebugRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-        Text(value, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+fun DebugRowFixed(label: String, value: String, valueColor: Color = Color.White) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            color = valueColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

@@ -13,7 +13,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.example.song.data.api.SpotifyResponse
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
@@ -21,6 +20,7 @@ import com.example.song.data.model.StreamingItem
 import com.example.song.data.repository.SongRepository
 import com.example.song.service.MusicService
 import com.example.song.util.PulseLogger
+import com.example.song.util.SpotifyResolver
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
@@ -168,49 +168,28 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             _isExtracting.value = true
             _extractionError.value = null
             try {
-                var spotifyMeta: SpotifyResponse? = null
-                val finalUrl = if (url.contains("spotify.com")) {
-                    try {
-                        val meta = repository.resolveSpotifyMetadata(url)
-                        spotifyMeta = meta
-                        
-                        val query = if (url.contains("/track/")) {
-                            "${meta.artist} - ${meta.title}"
-                        } else {
-                            // Album or Playlist - search for the title as a playlist candidate
-                            "${meta.title} playlist"
-                        }
-                        "ytsearch1:$query"
-                    } catch (e: Exception) {
-                        url 
-                    }
-                } else url
-
-                val items = YoutubeStreamHandler.getMetadata(finalUrl)
-                Log.d("SongViewModel", "Extraction results for $finalUrl: ${items.size} items")
+                val items = if (url.contains("spotify.com")) {
+                    SpotifyResolver.resolve(url, repository)
+                } else {
+                    YoutubeStreamHandler.getMetadata(url)
+                }
+                
+                Log.d("SongViewModel", "Extraction results for $url: ${items.size} items")
                 
                 if (items.isEmpty()) {
                     _extractionError.value = if (url.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
                     return@launch
                 }
 
-                // Enrichment for Spotify
-                val processedItems = if (spotifyMeta != null) {
-                    items.map { it.copy(
-                        title = spotifyMeta.title,
-                        thumbnailUrl = spotifyMeta.thumbnailUrl ?: it.thumbnailUrl
-                    )}
-                } else items
-
-                // Identify collection if it has multiple items OR is explicitly a playlist URL
-                val isCollection = processedItems.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
+                // Identify collection
+                val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
-                if (processedItems.size == 1 && !isCollection) {
+                if (items.size == 1 && !isCollection) {
                     // Single track, add immediately
-                    repository.insertStreamingItems(processedItems)
+                    repository.insertStreamingItems(items)
                 } else {
                     // Playlist, multiple items, or collection, show choice
-                    _pendingStreamingItems.value = processedItems
+                    _pendingStreamingItems.value = items
                 }
             } catch (e: Exception) {
                 val errorMsg = e.localizedMessage ?: ""
@@ -552,9 +531,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val bundle = android.os.Bundle().apply {
             putString("youtube_url", youtubeUrl)
         }
+        // Use a custom scheme to signal MusicService to resolve this.
+        // This prevents ExoPlayer from trying to 'play' a raw youtube/spotify link.
+        val safeUri = directUrl ?: "pulse_placeholder:$youtubeUrl"
+        
         return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(directUrl ?: youtubeUrl) // Placeholder, Service will resolve this if it's the youtubeUrl
+            .setUri(Uri.parse(safeUri))
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
@@ -646,27 +629,17 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isExtracting.value = true
             try {
-                var spotifyMeta: SpotifyResponse? = null
-                val finalUrl = if (url.contains("spotify.com")) {
-                    try {
-                        val meta = repository.resolveSpotifyMetadata(url)
-                        spotifyMeta = meta
-                        
-                        val query = if (url.contains("/track/")) {
-                            "${meta.artist} - ${meta.title}"
-                        } else {
-                            "${meta.title} playlist"
-                        }
-                        "ytsearch1:$query"
-                    } catch (e: Exception) {
-                        url
-                    }
-                } else if (url.contains("list=")) {
+                // Sanitize YouTube URLs
+                val sanitizedUrl = if (url.contains("youtube.com") && url.contains("list=")) {
                     val listId = url.substringAfter("list=").substringBefore("&")
                     "https://www.youtube.com/playlist?list=$listId"
                 } else url
 
-                val items = YoutubeStreamHandler.getMetadata(finalUrl)
+                val items = if (url.contains("spotify.com")) {
+                    SpotifyResolver.resolve(url, repository)
+                } else {
+                    YoutubeStreamHandler.getMetadata(sanitizedUrl)
+                }
                 
                 if (items.isEmpty()) {
                     if (url.contains("spotify.com")) {
@@ -677,23 +650,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Enrichment for Spotify
-                val processedItems = if (spotifyMeta != null) {
-                    items.map { it.copy(
-                        title = spotifyMeta.title,
-                        thumbnailUrl = spotifyMeta.thumbnailUrl ?: it.thumbnailUrl
-                    )}
-                } else items
-
                 // Identify collection
-                val isCollection = processedItems.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
+                val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
-                if (processedItems.size == 1 && !isCollection) {
+                if (items.size == 1 && !isCollection) {
                     // Single track, download immediately
-                    downloadFromYoutube(processedItems[0].youtubeUrl)
+                    downloadFromYoutube(items[0].youtubeUrl)
                 } else {
                     // Playlist, multiple items, or collection, show choice
-                    _pendingDownloadItems.value = processedItems
+                    _pendingDownloadItems.value = items
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

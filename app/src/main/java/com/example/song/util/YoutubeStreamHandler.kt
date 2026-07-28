@@ -2,7 +2,6 @@ package com.example.song.util
 
 import android.util.Log
 import com.example.song.data.model.StreamingItem
-import com.example.song.util.PulseLogger
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +15,6 @@ object YoutubeStreamHandler {
         try {
             PulseLogger.updateTask("Initializing Engine...")
             val isCollectionUrl = url.contains("list=") || url.contains("/playlist/") || url.contains("/album/")
-            val isSpotifyUrl = url.contains("spotify.com")
             
             val request = YoutubeDLRequest(url).apply {
                 addOption("--dump-json")
@@ -36,7 +34,6 @@ object YoutubeStreamHandler {
             val output = response.out
             Log.d(TAG, "Fetched metadata. Output length: ${output.length}")
             PulseLogger.updateTask("Parsing Results...")
-            PulseLogger.log("Extracted ${output.length} bytes metadata")
             
             val items = mutableListOf<StreamingItem>()
             var playlistItem: StreamingItem? = null
@@ -65,12 +62,12 @@ object YoutubeStreamHandler {
                             for (i in 0 until entries.length()) {
                                 try {
                                     val entry = entries.getJSONObject(i)
-                                    parseJsonToStreamingItem(entry, isSpotifyUrl, playlistItem)?.let { items.add(it) }
+                                    parseJsonToStreamingItem(entry, playlistItem)?.let { items.add(it) }
                                 } catch (_: Exception) {}
                             }
                         }
                     } else {
-                        parseJsonToStreamingItem(json, isSpotifyUrl, playlistItem)?.let { entryItem ->
+                        parseJsonToStreamingItem(json, playlistItem)?.let { entryItem ->
                             if (items.none { it.youtubeUrl == entryItem.youtubeUrl }) {
                                 items.add(entryItem)
                             }
@@ -82,7 +79,7 @@ object YoutubeStreamHandler {
             if (playlistItem == null && isCollectionUrl) {
                 playlistItem = StreamingItem(
                     youtubeUrl = url,
-                    title = if (isSpotifyUrl) "Spotify Collection" else "YouTube Collection",
+                    title = "YouTube Collection",
                     thumbnailUrl = items.firstOrNull()?.thumbnailUrl,
                     isPlaylist = true
                 )
@@ -112,15 +109,15 @@ object YoutubeStreamHandler {
     }
 
     private fun extractThumbnail(json: JSONObject): String? {
-        return if (json.has("thumbnail")) {
-            json.getString("thumbnail")
-        } else if (json.has("thumbnails")) {
-            val thumbnails = json.getJSONArray("thumbnails")
-            if (thumbnails.length() > 0) thumbnails.getJSONObject(thumbnails.length() - 1).getString("url") else null
-        } else null
+        if (json.has("thumbnail")) return json.getString("thumbnail")
+        val thumbnails = json.optJSONArray("thumbnails")
+        if (thumbnails != null && thumbnails.length() > 0) {
+            return thumbnails.getJSONObject(thumbnails.length() - 1).optString("url")
+        }
+        return null
     }
 
-    private fun parseJsonToStreamingItem(json: JSONObject, isSpotifySource: Boolean, playlist: StreamingItem?): StreamingItem? {
+    private fun parseJsonToStreamingItem(json: JSONObject, playlist: StreamingItem?): StreamingItem? {
         val id = json.optString("id")
         val title = json.optString("title")
         val webUrl = json.optString("webpage_url")
@@ -128,13 +125,10 @@ object YoutubeStreamHandler {
         
         if (id.isEmpty() && title.isEmpty() && webUrl.isEmpty() && url.isEmpty()) return null
 
-        val artist = json.optString("artist") ?: json.optString("uploader") ?: json.optString("channel") ?: "Unknown Artist"
-        
         val finalUrl = when {
             id.isNotEmpty() -> if (webUrl.isNotEmpty()) webUrl else "https://www.youtube.com/watch?v=$id"
             webUrl.isNotEmpty() -> webUrl
             url.isNotEmpty() && url.startsWith("http") -> url
-            isSpotifySource && title.isNotEmpty() -> "ytsearch1:$title $artist"
             else -> null
         } ?: return null
 
@@ -158,12 +152,17 @@ object YoutubeStreamHandler {
             PulseLogger.log("Resolving audio URL for: $youtubeUrl")
             val actualUrl = if (youtubeUrl.startsWith("ytsearch")) {
                 val results = getMetadata(youtubeUrl)
-                results.find { !it.isPlaylist }?.youtubeUrl
+                // Filter out playlists to avoid "Source error" during bridge
+                val bestMatch = results.find { !it.isPlaylist }
+                bestMatch?.youtubeUrl
             } else {
                 youtubeUrl
             }
 
-            if (actualUrl == null || actualUrl.startsWith("ytsearch")) return@withContext null
+            if (actualUrl == null || actualUrl.startsWith("ytsearch")) {
+                PulseLogger.log("Resolution failed for: $youtubeUrl", isError = true)
+                return@withContext null
+            }
 
             val request = YoutubeDLRequest(actualUrl).apply {
                 addOption("-f", "bestaudio")
