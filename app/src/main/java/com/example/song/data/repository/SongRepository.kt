@@ -194,6 +194,9 @@ class SongRepository(
     suspend fun downloadYouTubeAudio(
         url: String, 
         playlistId: Int? = null,
+        overrideTitle: String? = null,
+        overrideArtist: String? = null,
+        overrideImageUrl: String? = null,
         progressCallback: (Float, Long) -> Unit
     ) = withContext(Dispatchers.IO) {
         val requestId = UUID.randomUUID().toString()
@@ -205,8 +208,16 @@ class SongRepository(
         try {
             Log.d("SongRepository", "Starting download for URL: $url")
             
+            // If it's a search bridge query, resolve it to a real URL first
+            val actualUrl = if (url.startsWith("ytsearch")) {
+                val results = YoutubeStreamHandler.getMetadata(url)
+                results.find { !it.isPlaylist }?.youtubeUrl ?: url
+            } else {
+                url
+            }
+
             // 1. Create a separate request for getting info
-            val infoRequest = YoutubeDLRequest(url).apply {
+            val infoRequest = YoutubeDLRequest(actualUrl).apply {
                 addOption("--no-check-certificate")
                 addOption("--yes-playlist")
                 addOption("--playlist-items", "1")
@@ -277,19 +288,19 @@ class SongRepository(
                 
                 val songId = if (downloadedFile.renameTo(finalFile)) {
                     val song = Song(
-                        title = videoInfo.title ?: finalFile.nameWithoutExtension,
-                        artist = videoInfo.uploader ?: "YouTube",
+                        title = overrideTitle ?: videoInfo.title ?: finalFile.nameWithoutExtension,
+                        artist = overrideArtist ?: videoInfo.uploader ?: "YouTube",
                         audioUri = finalFile.absolutePath,
-                        imageUrl = videoInfo.thumbnail,
+                        imageUrl = overrideImageUrl ?: videoInfo.thumbnail,
                         duration = videoInfo.duration * 1000L
                     )
                     insertSong(song)
                 } else {
                     val song = Song(
-                        title = videoInfo.title ?: downloadedFile.nameWithoutExtension,
-                        artist = videoInfo.uploader ?: "YouTube",
+                        title = overrideTitle ?: videoInfo.title ?: downloadedFile.nameWithoutExtension,
+                        artist = overrideArtist ?: videoInfo.uploader ?: "YouTube",
                         audioUri = downloadedFile.absolutePath,
-                        imageUrl = videoInfo.thumbnail,
+                        imageUrl = overrideImageUrl ?: videoInfo.thumbnail,
                         duration = videoInfo.duration * 1000L
                     )
                     insertSong(song)

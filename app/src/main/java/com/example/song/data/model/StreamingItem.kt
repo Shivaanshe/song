@@ -9,6 +9,7 @@ data class StreamingItem(
     val id: Int = 0,
     val youtubeUrl: String,
     val title: String,
+    val artist: String? = null,
     val thumbnailUrl: String?,
     val isPlaylist: Boolean = false,
     val parentPlaylistUrl: String? = null,

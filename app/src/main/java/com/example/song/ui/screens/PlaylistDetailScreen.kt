@@ -60,6 +60,8 @@ fun PlaylistDetailScreen(
     
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedSongIds by viewModel.selectedSongIds.collectAsState()
+    val currentSong by viewModel.currentPlayingSong.collectAsState()
+    
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -352,7 +354,8 @@ fun PlaylistDetailScreen(
                                 viewModel.toggleSelectionMode(true)
                                 viewModel.toggleSongSelection(song.id)
                             },
-                            selectionMode = isSelectionMode
+                            selectionMode = isSelectionMode,
+                            isPlaying = currentSong?.id == song.id
                         )
                     }
                 }

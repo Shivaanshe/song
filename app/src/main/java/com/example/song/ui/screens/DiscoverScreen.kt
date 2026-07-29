@@ -843,10 +843,21 @@ fun StreamingItemCard(
     selectionMode: Boolean = false
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
-    
+
+    val infiniteTransition = rememberInfiniteTransition(label = "PulseTransition")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PulseScale"
+    )
+
     val scale by animateFloatAsState(
-        targetValue = if (isSelected) 0.95f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        targetValue = if (isSelected) 0.95f else if (isPlaying) pulseScale else 1f,
+        animationSpec = if (isSelected || isPlaying) spring(dampingRatio = Spring.DampingRatioMediumBouncy) else tween(300),
         label = "SelectionScale"
     )
 
@@ -861,15 +872,19 @@ fun StreamingItemCard(
                 onLongClick = onLongClick
             )
             .border(
-                width = if (isSelected) 2.dp else 1.5.dp,
-                brush = if (isSelected) {
-                    Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
-                } else {
-                    Brush.linearGradient(colors = listOf(Color.White.copy(alpha = 0.3f), Color.White.copy(alpha = 0.3f)))
+                width = if (isSelected || isPlaying) 2.dp else 1.5.dp,
+                brush = when {
+                    isSelected -> Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
+                    isPlaying -> Brush.linearGradient(colors = listOf(Color(0xFF00E676), Color(0xFF1DE9B6)))
+                    else -> Brush.linearGradient(colors = listOf(Color.White.copy(alpha = 0.3f), Color.White.copy(alpha = 0.3f)))
                 },
                 shape = RoundedCornerShape(20.dp)
             ),
-        color = if (isSelected) Color.White.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.3f),
+        color = when {
+            isSelected -> Color.White.copy(alpha = 0.4f)
+            isPlaying -> Color.White.copy(alpha = 0.5f)
+            else -> Color.White.copy(alpha = 0.3f)
+        },
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -949,10 +964,12 @@ fun StreamingItemCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = if (item.isPlaylist) "YouTube Playlist" else "YouTube Stream",
+                    text = item.artist ?: if (item.isPlaylist) "YouTube Playlist" else "YouTube Stream",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = Color(0xFF666666)
-                    )
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 

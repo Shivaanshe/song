@@ -655,7 +655,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 
                 if (items.size == 1 && !isCollection) {
                     // Single track, download immediately
-                    downloadFromYoutube(items[0].youtubeUrl)
+                    val item = items[0]
+                    
+                    downloadFromYoutube(
+                        url = item.youtubeUrl,
+                        overrideTitle = item.title,
+                        overrideArtist = item.artist,
+                        overrideImageUrl = item.thumbnailUrl
+                    )
                 } else {
                     // Playlist, multiple items, or collection, show choice
                     _pendingDownloadItems.value = items
@@ -704,11 +711,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             items.forEachIndexed { index, item ->
                 try {
                     _downloadState.value = DownloadState.Downloading(0f, index + 1, items.size)
-                    repository.downloadYouTubeAudio(item.youtubeUrl, playlistId) { progress, _ ->
+                    
+                    repository.downloadYouTubeAudio(
+                        url = item.youtubeUrl, 
+                        playlistId = playlistId,
+                        overrideTitle = item.title,
+                        overrideArtist = item.artist,
+                        overrideImageUrl = item.thumbnailUrl
+                    ) { progress, _ ->
                         _downloadState.value = DownloadState.Downloading(progress, index + 1, items.size)
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("SongViewModel", "Failed to download ${item.title}", e)
+                    Log.e("SongViewModel", "Failed to download ${item.title}", e)
                 }
             }
             
@@ -722,7 +736,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _pendingDownloadItems.value = emptyList()
     }
 
-    fun downloadFromYoutube(url: String) {
+    fun downloadFromYoutube(
+        url: String,
+        overrideTitle: String? = null,
+        overrideArtist: String? = null,
+        overrideImageUrl: String? = null
+    ) {
         viewModelScope.launch {
             // Self-Heal Improvement: Wait for engine readiness instead of failing immediately
             val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
@@ -741,7 +760,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                repository.downloadYouTubeAudio(url) { progress, _ ->
+                repository.downloadYouTubeAudio(
+                    url = url,
+                    overrideTitle = overrideTitle,
+                    overrideArtist = overrideArtist,
+                    overrideImageUrl = overrideImageUrl
+                ) { progress, _ ->
                     _downloadState.value = DownloadState.Downloading(progress)
                 }
                 _downloadState.value = DownloadState.Success
