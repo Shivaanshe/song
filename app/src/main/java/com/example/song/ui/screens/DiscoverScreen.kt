@@ -318,7 +318,7 @@ fun DiscoverScreen(
                                 )
                             }
                             items(singleSongs, key = { it.id }) { item ->
-                                val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
+                                val isCurrentItemPlaying = currentPlayingSong?.id == item.id
                                 StreamingItemCard(
                                     item = item,
                                     enabled = isEngineReady,
@@ -391,7 +391,7 @@ fun DiscoverScreen(
                             )
                         }
                         items(nonPlaylistItems, key = { it.id }) { item ->
-                            val isCurrentItemPlaying = currentPlayingSong?.audioUri == item.youtubeUrl
+                            val isCurrentItemPlaying = currentPlayingSong?.id == item.id
                             StreamingItemCard(
                                 item = item,
                                 enabled = isEngineReady,

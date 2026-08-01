@@ -149,6 +149,7 @@ class MusicService : MediaSessionService() {
                         if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
                             val updatedItem = mediaItem.buildUpon()
                                 .setUri(directUrl)
+                                .setMediaMetadata(mediaItem.mediaMetadata) // Explicitly lock original metadata
                                 .build()
                             
                             player.replaceMediaItem(i, updatedItem)

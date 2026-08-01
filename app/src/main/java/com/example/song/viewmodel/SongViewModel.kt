@@ -541,7 +541,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
-                    .setArtist("YouTube")
+                    .setArtist(artist ?: "YouTube")
                     .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
                     .setExtras(bundle)
                     .build()
@@ -576,7 +576,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 Song(
                     id = it.id,
                     title = it.title,
-                    artist = "YouTube",
+                    artist = it.artist ?: "YouTube",
                     audioUri = it.youtubeUrl,
                     imageUrl = it.thumbnailUrl,
                     duration = it.duration

@@ -133,7 +133,11 @@ object YoutubeStreamHandler {
         } ?: return null
 
         val thumb = extractThumbnail(json) ?: playlist?.thumbnailUrl
-        val artist = json.optString("uploader") ?: json.optString("artist") ?: json.optString("channel") ?: "Unknown Artist"
+        val artist = json.optString("uploader").ifEmpty { 
+            json.optString("artist").ifEmpty { 
+                json.optString("channel").ifEmpty { "Unknown Artist" } 
+            } 
+        }
         val duration = json.optLong("duration", 0L)
 
         return StreamingItem(

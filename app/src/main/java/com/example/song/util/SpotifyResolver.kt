@@ -16,7 +16,6 @@ import java.util.regex.Pattern
 object SpotifyResolver {
     private const val TAG = "SpotifyResolver"
     
-    // Increase timeouts to 30 seconds to prevent SocketTimeoutException
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -24,11 +23,22 @@ object SpotifyResolver {
         .build()
 
     suspend fun resolve(url: String, repository: SongRepository): List<StreamingItem> = withContext(Dispatchers.IO) {
+        val isSingleTrack = url.contains("/track/")
+        
+        // Layer 1: Fetch clean metadata from Spotify API first
+        val apiMeta = try {
+            PulseLogger.updateTask("Fetching Spotify Meta...")
+            repository.resolveSpotifyMetadata(url)
+        } catch (e: Exception) {
+            Log.e(TAG, "Spotify API failed", e)
+            null
+        }
+
+        // Layer 2: Attempt high-performance Embed Scraper
         try {
             PulseLogger.updateTask("Scraping Spotify Embed...")
             PulseLogger.log("Opening Spotify Embed Bridge for: $url")
 
-            // Step 1: Convert to Embed URL
             val embedUrl = when {
                 url.contains("/track/") -> url.replace("/track/", "/embed/track/")
                 url.contains("/album/") -> url.replace("/album/", "/embed/album/")
@@ -36,7 +46,6 @@ object SpotifyResolver {
                 else -> url
             }
 
-            // Step 2: Fetch HTML with Browser User-Agent
             val request = Request.Builder()
                 .url(embedUrl)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
@@ -45,7 +54,6 @@ object SpotifyResolver {
             val response = client.newCall(request).execute()
             val html = response.body?.string() ?: ""
 
-            // Step 3: Extract __NEXT_DATA__ JSON using Regex
             val pattern = Pattern.compile("<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>")
             val matcher = pattern.matcher(html)
             
@@ -54,12 +62,11 @@ object SpotifyResolver {
                     val jsonStr = matcher.group(1) ?: ""
                     val fullJson = JSONObject(jsonStr)
                     
-                    // Step 4: Parse the track list
-                    val pageProps = fullJson.optJSONObject("props")?.optJSONObject("pageProps") ?: return@withContext fallbackToYtDlp(url)
-                    val entity = pageProps.optJSONObject("state")?.optJSONObject("data")?.optJSONObject("entity") ?: return@withContext fallbackToYtDlp(url)
+                    val pageProps = fullJson.optJSONObject("props")?.optJSONObject("pageProps") ?: return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
+                    val entity = pageProps.optJSONObject("state")?.optJSONObject("data")?.optJSONObject("entity") ?: return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
                     
-                    val title = entity.optString("title", "Spotify Collection")
-                    val collectionThumb = extractSpotifyImage(entity) ?: ""
+                    val collectionTitle = apiMeta?.title ?: entity.optString("title", "Spotify Collection")
+                    val collectionThumb = apiMeta?.thumbnailUrl ?: extractSpotifyImage(entity) ?: ""
                     
                     val tracks = mutableListOf<StreamingItem>()
                     val trackList = entity.optJSONArray("trackList")
@@ -68,7 +75,9 @@ object SpotifyResolver {
                         for (i in 0 until trackList.length()) {
                             val trackJson = trackList.getJSONObject(i)
                             val trackTitle = trackJson.optString("title")
-                            val trackArtist = trackJson.optString("subtitle") ?: trackJson.optString("artist") ?: "Unknown Artist"
+                            val trackArtist = trackJson.optString("subtitle").ifEmpty { 
+                                trackJson.optString("artist").ifEmpty { apiMeta?.artist ?: "Unknown Artist" } 
+                            }
                             
                             if (trackTitle.isNotEmpty()) {
                                 var trackThumb = extractSpotifyImage(trackJson)
@@ -77,7 +86,7 @@ object SpotifyResolver {
                                 }
                                 
                                 tracks.add(StreamingItem(
-                                    youtubeUrl = "ytsearch1:$trackArtist - $trackTitle official audio",
+                                    youtubeUrl = "ytsearch1:official audio $trackArtist - $trackTitle",
                                     title = trackTitle,
                                     artist = trackArtist,
                                     thumbnailUrl = trackThumb ?: collectionThumb,
@@ -87,15 +96,37 @@ object SpotifyResolver {
                                 ))
                             }
                         }
+                    } else if (isSingleTrack) {
+                        val trackTitle = apiMeta?.title ?: entity.optString("title")
+                        val trackArtist = apiMeta?.artist ?: entity.optString("subtitle").ifEmpty { 
+                            entity.optString("artist").ifEmpty { "Unknown Artist" } 
+                        }
+                        if (trackTitle != null && trackTitle.isNotEmpty()) {
+                            var trackThumb = extractSpotifyImage(entity)
+                            if (trackThumb == null || (trackThumb.contains("spotifycdn.com/embed"))) {
+                                trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
+                            }
+                            
+                            tracks.add(StreamingItem(
+                                youtubeUrl = "ytsearch1:official audio $trackArtist - $trackTitle",
+                                title = trackTitle,
+                                artist = trackArtist,
+                                thumbnailUrl = trackThumb ?: collectionThumb,
+                                isPlaylist = false,
+                                parentPlaylistUrl = null,
+                                duration = entity.optLong("duration", 0L)
+                            ))
+                        }
                     }
 
-                    if (tracks.isEmpty()) return@withContext fallbackToYtDlp(url)
+                    if (tracks.isEmpty()) return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
 
                     val result = mutableListOf<StreamingItem>()
-                    if (tracks.size > 1) {
+                    if (tracks.size > 1 || !isSingleTrack) {
                         result.add(StreamingItem(
                             youtubeUrl = url,
-                            title = title,
+                            title = collectionTitle,
+                            artist = apiMeta?.artist ?: "Spotify",
                             thumbnailUrl = collectionThumb,
                             isPlaylist = true
                         ))
@@ -106,26 +137,42 @@ object SpotifyResolver {
                     PulseLogger.updateTask(null)
                     return@withContext result
                 } catch (e: Exception) {
-                    PulseLogger.log("JSON Parse failed. Falling back to YtDlp...", isError = true)
-                    return@withContext fallbackToYtDlp(url)
+                    PulseLogger.log("Scrape Parse Error. Falling back...", isError = true)
+                    return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
                 }
             } else {
-                PulseLogger.log("Embed JSON not found. Falling back to YtDlp...", isError = true)
-                return@withContext fallbackToYtDlp(url)
+                return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Embed Scrape Failed", e)
-            val errorMsg = if (e is java.net.SocketTimeoutException) "Network Timeout (Spotify is slow)" else e.localizedMessage
-            PulseLogger.log("Scrape Failed: $errorMsg. Retrying with YouTube Search Bridge...", isError = true)
-            
-            // Smart Fallback: Search YouTube for the Collection Title
-            return@withContext try {
+            return@withContext fallbackWithMeta(url, apiMeta, isSingleTrack)
+        }
+    }
+
+    private suspend fun fallbackWithMeta(url: String, apiMeta: com.example.song.data.api.SpotifyResponse?, isSingleTrack: Boolean): List<StreamingItem> {
+        PulseLogger.log("Scraper blocked. Using YouTube Bridge Fallback...", isError = true)
+        return try {
+            val query = if (apiMeta != null) {
+                if (isSingleTrack) "official audio ${apiMeta.artist} - ${apiMeta.title}"
+                else "playlist ${apiMeta.artist} ${apiMeta.title}"
+            } else {
                 val searchTitle = url.substringAfterLast("/").substringBefore("?")
-                val albumQuery = "ytsearch1:playlist $searchTitle"
-                YoutubeStreamHandler.getMetadata(albumQuery)
-            } catch (fallbackEx: Exception) {
-                fallbackToYtDlp(url)
+                if (isSingleTrack) "ytsearch1:official audio $searchTitle"
+                else "ytsearch1:playlist $searchTitle"
             }
+            
+            val results = YoutubeStreamHandler.getMetadata(if (query.startsWith("ytsearch")) query else "ytsearch1:$query")
+            
+            if (apiMeta != null) {
+                results.map { 
+                    if (it.isPlaylist) it.copy(title = apiMeta.title, artist = apiMeta.artist, thumbnailUrl = apiMeta.thumbnailUrl)
+                    else it.copy(artist = apiMeta.artist)
+                }
+            } else results
+        } catch (e: Exception) {
+            emptyList()
+        } finally {
+            PulseLogger.updateTask(null)
         }
     }
 
@@ -141,69 +188,5 @@ object SpotifyResolver {
             }
         }
         return null
-    }
-
-    private suspend fun fallbackToYtDlp(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
-        PulseLogger.updateTask("Running YtDlp Fallback...")
-        try {
-            val request = YoutubeDLRequest(url).apply {
-                addOption("--dump-json")
-                addOption("--flat-playlist")
-                addOption("--no-check-certificate")
-                addOption("--playlist-end", "50")
-            }
-            val response = YoutubeDL.getInstance().execute(request)
-            val output = response.out
-            
-            val tracks = mutableListOf<StreamingItem>()
-            var collectionItem: StreamingItem? = null
-
-            output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
-                try {
-                    val json = JSONObject(line)
-                    val type = json.optString("_type")
-                    if (type == "playlist") {
-                         collectionItem = StreamingItem(
-                            youtubeUrl = json.optString("webpage_url", url),
-                            title = json.optString("title", "Spotify Collection"),
-                            thumbnailUrl = json.optString("thumbnail"),
-                            isPlaylist = true
-                        )
-                        val entries = json.optJSONArray("entries")
-                        if (entries != null) {
-                            for (i in 0 until entries.length()) {
-                                val entry = entries.getJSONObject(i)
-                                mapEntry(entry, collectionItem)?.let { tracks.add(it) }
-                            }
-                        }
-                    } else {
-                        mapEntry(json, collectionItem)?.let { tracks.add(it) }
-                    }
-                } catch (e: Exception) {}
-            }
-            
-            val result = mutableListOf<StreamingItem>()
-            collectionItem?.let { result.add(it) }
-            result.addAll(tracks)
-            result
-        } catch (e: Exception) {
-            emptyList()
-        } finally {
-            PulseLogger.updateTask(null)
-        }
-    }
-
-    private fun mapEntry(json: JSONObject, col: StreamingItem?): StreamingItem? {
-        val title = json.optString("title")
-        val artist = json.optString("uploader") ?: json.optString("artist") ?: "Unknown Artist"
-        if (title.isEmpty()) return null
-        return StreamingItem(
-            youtubeUrl = "ytsearch1:$artist - $title official audio",
-            title = title,
-            artist = artist,
-            thumbnailUrl = json.optString("thumbnail") ?: col?.thumbnailUrl,
-            isPlaylist = false,
-            parentPlaylistUrl = col?.youtubeUrl
-        )
     }
 }
