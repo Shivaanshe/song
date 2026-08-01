@@ -25,6 +25,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.song.ui.components.DebugOverlay
+import com.example.song.ui.components.FluidMeshBackground
 import com.example.song.ui.components.NowPlayingBar
 import com.example.song.ui.screens.LibraryScreen
 import com.example.song.ui.screens.PlayerScreen
@@ -92,22 +93,11 @@ fun MainApp(viewModel: SongViewModel) {
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
 
-    val backgroundGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFFD1C4E9),
-            Color(0xFFBBDEFB)
-        )
-    )
-
     // Screens where bottom bar should be visible
     val mainScreens = listOf("library", "favorites", "discover")
     val showBottomBar = currentDestination?.route in mainScreens
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundGradient)
-    ) {
+    FluidMeshBackground {
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {

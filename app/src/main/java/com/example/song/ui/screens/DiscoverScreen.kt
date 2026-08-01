@@ -78,24 +78,6 @@ fun DiscoverScreen(
     var youtubeUrl by remember { mutableStateOf("") }
     var selectedPlaylist by remember { mutableStateOf<StreamingItem?>(null) }
 
-    val isUrlValid = remember(youtubeUrl) {
-        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && 
-            (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com")))
-    }
-
-    val addIconRotation by animateFloatAsState(
-        targetValue = if (showAddMenu) 135f else 0f,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "AddIconRotation"
-    )
-
-    val backgroundGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFFD1C4E9),
-            Color(0xFFBBDEFB)
-        )
-    )
-
     val filteredItems = remember(items, searchQuery) {
         if (searchQuery.isBlank()) items
         else items.filter { it.title.contains(searchQuery, ignoreCase = true) }
@@ -108,17 +90,25 @@ fun DiscoverScreen(
 
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedStreamingIds by viewModel.selectedStreamingIds.collectAsState()
+
+    val isUrlValid = remember(youtubeUrl) {
+        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && 
+            (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com")))
+    }
+
+    val addIconRotation by animateFloatAsState(
+        targetValue = if (showAddMenu) 135f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "AddIconRotation"
+    )
+
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Auto-scroll logic handled by multiSelectDragHandler
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundGradient)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -484,7 +474,7 @@ fun DiscoverScreen(
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Text(
-                                text = "Add from YouTube",
+                                text = "Add from YouTube & Spotify",
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF424242)

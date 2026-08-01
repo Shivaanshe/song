@@ -112,13 +112,6 @@ fun LibraryScreen(
         }
     )
 
-    val backgroundGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFFD1C4E9),
-            Color(0xFFBBDEFB)
-        )
-    )
-
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedSongIds by viewModel.selectedSongIds.collectAsState()
     val currentSong by viewModel.currentPlayingSong.collectAsState()
@@ -129,14 +122,10 @@ fun LibraryScreen(
     
     // Auto-scroll logic handled by multiSelectDragHandler
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundGradient)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 CenterAlignedTopAppBar(
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -391,7 +380,7 @@ fun LibraryScreen(
                         }
                     )
                     AddMenuOption(
-                        text = "Download from YT",
+                        text = "Download from YT & Spotify",
                         icon = Icons.Default.CloudDownload,
                         onClick = {
                             showAddMenu = false

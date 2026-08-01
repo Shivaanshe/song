@@ -77,13 +77,6 @@ fun PlaylistDetailScreen(
     var showAddSongDialog by remember { mutableStateOf(false) }
     val allSongs by viewModel.allSongs.collectAsState()
 
-    val backgroundGradient = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFFD1C4E9),
-            Color(0xFFBBDEFB)
-        )
-    )
-
     // Clear selection on disposal
     DisposableEffect(Unit) {
         onDispose {
@@ -91,11 +84,7 @@ fun PlaylistDetailScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundGradient)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) }
