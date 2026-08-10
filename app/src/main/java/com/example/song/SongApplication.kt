@@ -8,6 +8,8 @@ import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import com.example.song.data.database.AppDatabase
+import com.example.song.data.repository.SongRepository
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
@@ -29,6 +31,9 @@ class SongApplication : Application() {
 
     @androidx.media3.common.util.UnstableApi
     lateinit var playerCache: SimpleCache
+
+    lateinit var repository: SongRepository
+        private set
 
     companion object {
         private lateinit var instance: SongApplication
@@ -57,6 +62,14 @@ class SongApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        val database = AppDatabase.getDatabase(this)
+        repository = SongRepository(
+            database.songDao(),
+            database.playlistDao(),
+            database.streamingDao(),
+            filesDir
+        )
 
         initPlayerCache()
         

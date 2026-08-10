@@ -2,6 +2,7 @@ package com.example.song.service
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -11,10 +12,15 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import com.example.song.MainActivity
 import com.example.song.SongApplication
+import com.example.song.data.model.Song
 import com.example.song.util.PulseLogger
 import com.example.song.util.YoutubeStreamHandler
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
 
 @UnstableApi
@@ -27,20 +33,23 @@ class MusicService : MediaSessionService() {
     // Track which items are currently being resolved to avoid duplicate work
     private val resolvingIds = mutableSetOf<String>()
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Essential for Samsung Quick Panel and Playback Resumption
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onCreate() {
         super.onCreate()
         
-        val cache = SongApplication.getInstance().playerCache
+        val app = SongApplication.getInstance()
+        val cache = app.playerCache
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
         
-        // Use CacheDataSource only for HTTP(S) requests
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(httpDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-        // DefaultDataSource will handle file://, content://, etc.
-        // For other schemes (like http), it will fall back to cacheDataSourceFactory
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(this, cacheDataSourceFactory)
 
         player = ExoPlayer.Builder(this)
@@ -50,25 +59,20 @@ class MusicService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.let {
-                    // Resolve current item if needed
                     if (isYoutubePlaceholder(it)) {
                         resolveYoutubeUrl(it)
                     }
-                    
-                    // Proactively resolve nearby items in the queue
                     resolveNearbyItems()
                 }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 PulseLogger.log("Player error: ${error.errorCodeName} - ${error.localizedMessage}", isError = true)
-                // If we hit a source error, try to re-resolve the current item
                 if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
                     error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                     error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) {
                     
                     player.currentMediaItem?.let {
-                        // Only force re-resolve if it's a YouTube-sourced item or our placeholder
                         val uriString = it.localConfiguration?.uri.toString()
                         val isYoutubeSource = uriString.contains("youtube.com") || 
                                               uriString.contains("youtu.be") || 
@@ -84,16 +88,89 @@ class MusicService : MediaSessionService() {
             }
         })
 
+        val sessionActivityPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         mediaSession = MediaSession.Builder(this, player)
-            .setSessionActivity(
-                PendingIntent.getActivity(
-                    this,
-                    0,
-                    Intent(this, MainActivity::class.java),
-                    PendingIntent.FLAG_IMMUTABLE
-                )
+            .setSessionActivity(sessionActivityPendingIntent)
+            .setCallback(MediaSessionCallback())
+            .build()
+    }
+
+    private inner class MediaSessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            // Support all default session and player commands to ensure OS integration
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_PLAY_PAUSE)
+                .add(Player.COMMAND_SEEK_TO_NEXT)
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .build()
+            
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailablePlayerCommands(playerCommands)
+                .build()
+        }
+
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            android.util.Log.d("MusicService", "Playback resumption requested by system")
+            
+            val settableFuture = com.google.common.util.concurrent.SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            
+            serviceScope.launch {
+                val repository = SongApplication.getInstance().repository
+                val firstSong = repository.getFirstSongSync()
+                
+                if (firstSong != null) {
+                    val mediaItem = firstSong.toMediaItem()
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(listOf(mediaItem), 0, 0L))
+                } else {
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+                }
+            }
+            
+            return settableFuture
+        }
+    }
+
+    private fun Song.toMediaItem(): MediaItem {
+        val uri = if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
+            android.net.Uri.parse(audioUri)
+        } else {
+            android.net.Uri.fromFile(java.io.File(audioUri))
+        }
+
+        return MediaItem.Builder()
+            .setMediaId(id.toString())
+            .setUri(uri)
+            .setMediaMetadata(
+                androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setArtworkUri(imageUrl?.let { android.net.Uri.parse(it) })
+                    .build()
             )
             .build()
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        mediaSession?.run {
+            player.release()
+            release()
+        }
+        super.onDestroy()
     }
 
     private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
@@ -171,16 +248,5 @@ class MusicService : MediaSessionService() {
                 resolvingIds.remove(mediaItem.mediaId)
             }
         }
-    }
-
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
-
-    override fun onDestroy() {
-        serviceScope.cancel()
-        mediaSession?.run {
-            player.release()
-            release()
-        }
-        super.onDestroy()
     }
 }

@@ -1,5 +1,7 @@
 package com.example.song.ui.components
 
+import android.content.Context
+import android.os.PowerManager
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -7,6 +9,9 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
@@ -15,41 +20,59 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * A high-performance, cinematic fluid mesh background for the Pulse app.
- * Renders 4 animated orbs using additive blending (Screen) against a dark radial canvas.
+ * A battery-optimized, cinematic fluid mesh background for the Pulse app.
+ * Automatically freezes in Power Saving Mode and suspends when off-screen.
  */
 @Composable
 fun FluidMeshBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val context = LocalContext.current
+    
+    // 🔋 Power Saver Detection
+    val isPowerSaveMode by produceState(initialValue = false) {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        while (true) {
+            value = powerManager.isPowerSaveMode
+            delay(5000) // Polling every 5s is efficient enough for UI state
+        }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "FluidMeshTransition")
 
     // Master animation progress (0f to 1f over 8 seconds)
-    val progress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(8000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "MasterProgress"
-    )
+    // ⚡ Automatic Frame Clock Pausing: infiniteTransition natively suspends when composable is not visible.
+    val progressState = if (isPowerSaveMode) {
+        remember { mutableStateOf(0f) }
+    } else {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(8000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "MasterProgress"
+        )
+    }
+    val progress by progressState
 
     Box(modifier = modifier.fillMaxSize()) {
         // Background Drawing Layer
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                // 80px Gaussian Softening
-                .blur(80.dp)
-                // CompositingStrategy.Offscreen ensures BlendMode.Screen works correctly
+                // 🔋 Optimization: Remove expensive blur filter in Power Save Mode
+                .then(if (isPowerSaveMode) Modifier else Modifier.blur(80.dp))
                 .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         ) {
             val width = size.width
