@@ -550,48 +550,34 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
-        viewModelScope.launch {
-            _resolvingUrlId.value = item.id
-            val directUrl = YoutubeStreamHandler.getDirectAudioUrl(item.youtubeUrl)
-            _resolvingUrlId.value = null
-            
-            if (directUrl == null) {
-                _playbackError.value = "Could not resolve audio link."
-                return@launch
-            }
+        // --- Non-Blocking Resolution ---
+        // We open the player immediately with a placeholder. 
+        // MusicService will handle the background resolution and retries.
+        
+        val filteredQueue = queue.filter { !it.isPlaylist }
+        val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+        
+        val mediaItems = filteredQueue.map { it.toMediaItem() }
 
-            val filteredQueue = queue.filter { !it.isPlaylist }
-            val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-            
-            // Set the first item with a direct URL, the rest as placeholders
-            val mediaItems = filteredQueue.map { qItem ->
-                if (qItem.id == item.id) {
-                    qItem.toMediaItem(directUrl)
-                } else {
-                    qItem.toMediaItem()
-                }
-            }
+        _currentQueue.value = filteredQueue.map {
+            Song(
+                id = it.id,
+                title = it.title,
+                artist = it.artist ?: "YouTube",
+                audioUri = it.youtubeUrl,
+                imageUrl = it.thumbnailUrl,
+                duration = it.duration
+            )
+        }
+        _currentPlayingSong.value = _currentQueue.value.getOrNull(index)
+        _isPlaying.value = true
 
-            _currentQueue.value = filteredQueue.map {
-                Song(
-                    id = it.id,
-                    title = it.title,
-                    artist = it.artist ?: "YouTube",
-                    audioUri = it.youtubeUrl,
-                    imageUrl = it.thumbnailUrl,
-                    duration = it.duration
-                )
-            }
-            _currentPlayingSong.value = _currentQueue.value.getOrNull(index)
-            _isPlaying.value = true
-
-            mediaController?.apply {
-                val currentMode = repeatMode
-                setMediaItems(mediaItems, index, 0L)
-                repeatMode = currentMode
-                prepare()
-                play()
-            }
+        mediaController?.apply {
+            val currentMode = repeatMode
+            setMediaItems(mediaItems, index, 0L)
+            repeatMode = currentMode
+            prepare()
+            play()
         }
     }
 

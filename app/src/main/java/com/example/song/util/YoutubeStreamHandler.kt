@@ -10,6 +10,7 @@ import org.json.JSONObject
 
 object YoutubeStreamHandler {
     private const val TAG = "YoutubeStreamHandler"
+    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UD1A.230805.019; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.6099.144 Mobile Safari/537.36"
 
     suspend fun getMetadata(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
         try {
@@ -21,6 +22,8 @@ object YoutubeStreamHandler {
                 addOption("--flat-playlist")
                 addOption("--no-check-certificate")
                 addOption("--no-cache-dir")
+                addOption("--user-agent", USER_AGENT)
+                addOption("--extractor-args", "youtube:player_client=android,ios;web:visitor_data=random")
                 
                 if (!isCollectionUrl && !url.startsWith("ytsearch")) {
                     addOption("--no-playlist")
@@ -152,37 +155,59 @@ object YoutubeStreamHandler {
     }
 
     suspend fun getDirectAudioUrl(youtubeUrl: String): String? = withContext(Dispatchers.IO) {
-        try {
+        val actualUrl = if (youtubeUrl.startsWith("ytsearch")) {
             PulseLogger.updateTask("Resolving Bridge...")
-            PulseLogger.log("Resolving audio URL for: $youtubeUrl")
-            val actualUrl = if (youtubeUrl.startsWith("ytsearch")) {
-                val results = getMetadata(youtubeUrl)
-                // Filter out playlists to avoid "Source error" during bridge
-                val bestMatch = results.find { !it.isPlaylist }
-                bestMatch?.youtubeUrl
-            } else {
-                youtubeUrl
-            }
-
-            if (actualUrl == null || actualUrl.startsWith("ytsearch")) {
-                PulseLogger.log("Resolution failed for: $youtubeUrl", isError = true)
-                return@withContext null
-            }
-
-            val request = YoutubeDLRequest(actualUrl).apply {
-                addOption("-f", "bestaudio")
-                addOption("-g")
-                addOption("--no-check-certificate")
-                addOption("--no-cache-dir")
-                addOption("--no-playlist")
-            }
-            val response = YoutubeDL.getInstance().execute(request)
-            PulseLogger.updateTask(null)
-            return@withContext response.out.trim().takeIf { it.isNotEmpty() }
-        } catch (e: Exception) {
-            PulseLogger.updateTask(null)
-            Log.e(TAG, "Error getting direct audio URL: ${e.message}", e)
-            null
+            val results = getMetadata(youtubeUrl)
+            results.find { !it.isPlaylist }?.youtubeUrl
+        } else {
+            youtubeUrl
         }
+
+        if (actualUrl == null || actualUrl.startsWith("ytsearch")) {
+            PulseLogger.log("Resolution failed for: $youtubeUrl", isError = true)
+            return@withContext null
+        }
+
+        // --- Multi-Persona Fallback Strategy ---
+        val clientConfigs = listOf(
+            "android,web",        // Standard mix
+            "web,mweb",           // Browser mix
+            "android_tv,web",     // TV client (often bypasses SABR)
+            "android,ios"         // Mobile native mix
+        )
+
+        for ((index, clients) in clientConfigs.withIndex()) {
+            try {
+                PulseLogger.updateTask("Resolving ($clients)...")
+                PulseLogger.log("Attempt ${index + 1}: Resolving with [$clients]")
+                
+                val request = YoutubeDLRequest(actualUrl).apply {
+                    addOption("-f", "ba/ba*") // Relaxed format constraint
+                    addOption("-g")
+                    addOption("--no-check-certificate")
+                    addOption("--no-cache-dir")
+                    addOption("--no-playlist")
+                    addOption("--user-agent", USER_AGENT)
+                    addOption("--extractor-args", "youtube:player_client=$clients;web:visitor_data=random")
+                }
+                
+                val response = YoutubeDL.getInstance().execute(request)
+                val directUrl = response.out.trim()
+                
+                if (directUrl.isNotEmpty()) {
+                    PulseLogger.log("Resolution Success using [$clients]")
+                    PulseLogger.updateTask(null)
+                    return@withContext directUrl
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Attempt ${index + 1} [$clients] failed: ${e.message}")
+                if (index == clientConfigs.lastIndex) {
+                    PulseLogger.log("All resolution attempts failed.", isError = true)
+                }
+            }
+        }
+
+        PulseLogger.updateTask(null)
+        return@withContext null
     }
 }

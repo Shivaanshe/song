@@ -111,10 +111,12 @@ class MusicService : MediaSessionService() {
                 .add(Player.COMMAND_PLAY_PAUSE)
                 .add(Player.COMMAND_SEEK_TO_NEXT)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .add(Player.COMMAND_GET_METADATA)
                 .build()
             
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailablePlayerCommands(playerCommands)
+                .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS)
                 .build()
         }
 
@@ -132,6 +134,7 @@ class MusicService : MediaSessionService() {
                 
                 if (firstSong != null) {
                     val mediaItem = firstSong.toMediaItem()
+                    android.util.Log.d("MusicService", "Resuming with: ${firstSong.title}")
                     settableFuture.set(MediaSession.MediaItemsWithStartPosition(listOf(mediaItem), 0, 0L))
                 } else {
                     settableFuture.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
@@ -139,6 +142,15 @@ class MusicService : MediaSessionService() {
             }
             
             return settableFuture
+        }
+
+        override fun onMediaButtonEvent(
+            session: MediaSession,
+            controllerInfo: MediaSession.ControllerInfo,
+            intent: Intent
+        ): Boolean {
+            android.util.Log.d("MusicService", "Media button event: ${intent.action}")
+            return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
     }
 
@@ -217,8 +229,21 @@ class MusicService : MediaSessionService() {
                     mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
                 }
 
-                android.util.Log.d("MusicService", "Resolving placeholder URL: $youtubeUrl")
-                val directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
+                android.util.Log.d("MusicService", "Resolving URL: $youtubeUrl")
+                
+                // --- Retry Logic with Backoff ---
+                var directUrl: String? = null
+                var retryCount = 0
+                val maxRetries = 2
+
+                while (directUrl == null && retryCount <= maxRetries) {
+                    if (retryCount > 0) {
+                        PulseLogger.log("Retry $retryCount for $youtubeUrl...")
+                        delay(2000L * retryCount) // Linear backoff
+                    }
+                    directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
+                    retryCount++
+                }
                 
                 if (directUrl != null) {
                     // Find index of this item in the current playlist
@@ -226,7 +251,7 @@ class MusicService : MediaSessionService() {
                         if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
                             val updatedItem = mediaItem.buildUpon()
                                 .setUri(directUrl)
-                                .setMediaMetadata(mediaItem.mediaMetadata) // Explicitly lock original metadata
+                                .setMediaMetadata(mediaItem.mediaMetadata) // Lock original metadata
                                 .build()
                             
                             player.replaceMediaItem(i, updatedItem)
@@ -241,9 +266,11 @@ class MusicService : MediaSessionService() {
                             break
                         }
                     }
+                } else {
+                    PulseLogger.log("Giving up on $youtubeUrl after retries.", isError = true)
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                PulseLogger.log("Resolution crashed: ${e.message}", isError = true)
             } finally {
                 resolvingIds.remove(mediaItem.mediaId)
             }

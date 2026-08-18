@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,6 +30,8 @@ import com.example.song.viewmodel.SongViewModel
 @Composable
 fun DebugOverlay(viewModel: SongViewModel) {
     var showDialog by remember { mutableStateOf(false) }
+    var showFullError by remember { mutableStateOf(false) }
+    
     val playbackError by viewModel.playbackError.collectAsState()
     val extractionError by viewModel.extractionError.collectAsState()
     val isExtracting by viewModel.isExtracting.collectAsState()
@@ -87,16 +90,47 @@ fun DebugOverlay(viewModel: SongViewModel) {
                             DebugSection("Engine & Task Status") {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     DebugRowFixed("Live Task", currentTask ?: "Idle", Color(0xFF81C784))
-                                    DebugRowFixed("Extracting", isExtracting.toString())
-                                    DebugRowFixed("Resolving ID", resolvingId?.toString() ?: "None")
+                                    DebugRowFixed("Extracting", isExtracting.toString(), if(isExtracting) Color.Yellow else Color.White)
+                                    DebugRowFixed("Resolving ID", resolvingId?.toString() ?: "None", if(resolvingId != null) Color.Cyan else Color.White)
                                     currentSong?.let {
-                                        DebugRowFixed("Active Song", it.title)
+                                        DebugRowFixed("Active Song", it.title, Color(0xFFFF4081))
                                     }
                                 }
                             }
                         }
 
-                        // Section 2: Cache Monitor
+                        // Section 2: Active Errors (Red Alert)
+                        if (playbackError != null || extractionError != null) {
+                            item {
+                                DebugSection("🔥 Technical Errors") {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        val combinedError = extractionError ?: playbackError
+                                        Text(
+                                            combinedError ?: "",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Red,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        TextButton(onClick = { showFullError = !showFullError }) {
+                                            Text(if (showFullError) "Hide Full Report" else "View Technical Report", color = Color.Gray)
+                                        }
+                                        if (showFullError) {
+                                            Box(modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 200.dp)
+                                                .background(Color.Red.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                                .padding(8.dp)
+                                                .verticalScroll(rememberScrollState())
+                                            ) {
+                                                Text(combinedError ?: "", style = MaterialTheme.typography.labelSmall, color = Color.Red.copy(alpha = 0.8f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 3: Cache Monitor
                         item {
                             DebugSection("Cache Monitor (${cachedKeys.size} spans)") {
                                 Box(
@@ -125,7 +159,7 @@ fun DebugOverlay(viewModel: SongViewModel) {
                             }
                         }
 
-                        // Section 3: Playback Queue
+                        // Section 4: Playback Queue
                         item {
                             DebugSection("Playback Queue (${currentQueue.size})") {
                                 Column(
@@ -135,14 +169,9 @@ fun DebugOverlay(viewModel: SongViewModel) {
                                         .fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    if (playbackError != null) {
-                                        Text("ERROR: $playbackError", color = Color.Red, style = MaterialTheme.typography.labelSmall)
-                                    }
-                                    if (extractionError != null) {
-                                        Text("ERROR: $extractionError", color = Color.Red, style = MaterialTheme.typography.labelSmall)
-                                    }
                                     currentQueue.forEach { song ->
                                         val isPlaying = song.id == currentSong?.id
+                                        // Check if this song's ID or URI is in the cache keys
                                         val isCached = cachedKeys.any { it.contains(song.audioUri) || (song.id.toString() in cachedKeys) }
                                         
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,7 +201,7 @@ fun DebugOverlay(viewModel: SongViewModel) {
                             }
                         }
 
-                        // Section 4: System Logs
+                        // Section 5: System Logs
                         item {
                             DebugSection("System Logs (Live)") {
                                 Box(
@@ -233,12 +262,23 @@ fun DebugSection(title: String, content: @Composable () -> Unit) {
 
 @Composable
 fun DebugRowFixed(label: String, value: String, valueColor: Color = Color.White) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            label, 
+            style = MaterialTheme.typography.labelSmall, 
+            color = Color.Gray,
+            modifier = Modifier.width(100.dp)
+        )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
             color = valueColor,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
