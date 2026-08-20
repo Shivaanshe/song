@@ -53,9 +53,16 @@ class SongApplication : Application() {
 
     @androidx.media3.common.util.UnstableApi
     private fun initPlayerCache() {
-        val evictor = LeastRecentlyUsedCacheEvictor(300 * 1024 * 1024L) // 300MB
+        // Strict 300 MB limit using Least Recently Used (LRU) policy
+        val cacheSize: Long = 300L * 1024 * 1024 
+        val cacheEvictor = LeastRecentlyUsedCacheEvictor(cacheSize)
         val databaseProvider = StandaloneDatabaseProvider(this)
-        playerCache = SimpleCache(File(cacheDir, "media_cache"), evictor, databaseProvider)
+        
+        playerCache = SimpleCache(
+            File(cacheDir, "media_cache"), 
+            cacheEvictor, 
+            databaseProvider
+        )
         
         // Polling approach to avoid listener API version conflicts
         CoroutineScope(Dispatchers.IO).launch {
