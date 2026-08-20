@@ -277,6 +277,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                             _duration.value = duration
                             _playbackError.value = null
                         }
+                        
+                        // 🛡️ Task: Fix Auto-Skip Guard
+                        // Only auto-skip if the song actually played (pos > 1s).
+                        // This prevents stops from the Hard Intercept from skipping tracks.
+                        if (playbackState == Player.STATE_ENDED) {
+                            if (currentPosition > 1000) {
+                                skipToNext()
+                            }
+                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -521,12 +530,27 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _currentQueue.value = queue
         _currentPlayingSong.value = song
         
+        // 🛡️ Principal Fix: Hard Intercept
+        // If it's a placeholder or search, DO NOT call setMediaItems on the player yet.
+        if (song.audioUri.contains("placeholder") || song.audioUri.startsWith("yt")) {
+            mediaController?.let { controller ->
+                val args = android.os.Bundle().apply {
+                    putInt("id", song.id)
+                    putString("title", song.title)
+                    putString("artist", song.artist)
+                    putString("uri", song.audioUri)
+                    putString("image", song.imageUrl)
+                }
+                controller.sendCustomCommand(androidx.media3.session.SessionCommand("RESOLVE_AND_PLAY", android.os.Bundle.EMPTY), args)
+            }
+            return
+        }
+
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+        val items = queue.map { it.toMediaItem() }
         
         mediaController?.apply {
-            // Respect the current repeat mode when setting new media items
             val currentMode = repeatMode 
-            val items = queue.map { it.toMediaItem() }
             setMediaItems(items, index, 0L)
             repeatMode = currentMode
             prepare()
@@ -576,35 +600,67 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             Song(
                 id = it.id,
                 title = it.title,
-                artist = it.artist ?: "YouTube",
+                artist = it.artist ?: "Unknown Artist",
                 audioUri = it.youtubeUrl,
                 imageUrl = it.thumbnailUrl,
                 duration = it.duration
             )
         }
         _currentPlayingSong.value = _currentQueue.value.getOrNull(index)
-        _isPlaying.value = true
+        
+        // 🛡️ Principal Fix: Hard Intercept
+        // If it's a placeholder or search, DO NOT call setMediaItems on the player yet.
+        // Instead, we send a custom command to the service to start resolution silently.
+        val targetSong = _currentPlayingSong.value
+        if (targetSong != null && (targetSong.audioUri.contains("placeholder") || targetSong.audioUri.startsWith("yt"))) {
+            mediaController?.let { controller ->
+                val args = android.os.Bundle().apply {
+                    putInt("id", targetSong.id)
+                    putString("title", targetSong.title)
+                    putString("artist", targetSong.artist)
+                    putString("uri", targetSong.audioUri)
+                    putString("image", targetSong.imageUrl)
+                }
+                controller.sendCustomCommand(androidx.media3.session.SessionCommand("RESOLVE_AND_PLAY", android.os.Bundle.EMPTY), args)
+            }
+            return
+        }
 
         mediaController?.apply {
             val currentMode = repeatMode
             setMediaItems(mediaItems, index, 0L)
             repeatMode = currentMode
-            prepare()
-            play()
         }
     }
 
     fun skipToNext() {
-        mediaController?.seekToNext()
+        val queue = _currentQueue.value
+        val current = _currentPlayingSong.value ?: return
+        val index = queue.indexOfFirst { it.id == current.id }
+        
+        if (index != -1 && index < queue.size - 1) {
+            playSong(queue[index + 1], queue)
+        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL && queue.isNotEmpty()) {
+            playSong(queue[0], queue)
+        }
     }
 
     fun skipToPrevious() {
+        val queue = _currentQueue.value
+        val current = _currentPlayingSong.value ?: return
+        val index = queue.indexOfFirst { it.id == current.id }
+        
         mediaController?.let {
             if (it.currentPosition > 3000) {
                 it.seekTo(0L)
-            } else {
-                it.seekToPrevious()
+                return
             }
+        }
+
+        if (index > 0) {
+            playSong(queue[index - 1], queue)
+        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL && queue.isNotEmpty()) {
+            playSong(queue.last(), queue)
         }
     }
 

@@ -7,14 +7,22 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 object YoutubeStreamHandler {
     private const val TAG = "YoutubeStreamHandler"
+    
+    // 🛡️ Task 2: Mutex Lock to prevent parallel yt-dlp queries
+    // This forces sequential execution to prevent rate-limiting and instance crashes.
+    private val ytDlMutex = Mutex()
 
     suspend fun getMetadata(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
         try {
-            val sanitizedUrl = url.removePrefix("pulse_placeholder:")
+            // Task 1: Clean prefix if it exists in input
+            val sanitizedUrl = sanitizeUrl(url)
+            
             PulseLogger.updateTask("Initializing Engine...")
             val isCollectionUrl = sanitizedUrl.contains("list=") || sanitizedUrl.contains("/playlist/") || sanitizedUrl.contains("/album/")
             
@@ -22,11 +30,10 @@ object YoutubeStreamHandler {
                 addOption("--dump-json")
                 addOption("--flat-playlist")
                 addOption("--no-check-certificate")
-                addOption("--rm-cache-dir") // Clear cache for fresh tokens
-                // Use android_vr and mweb as primary personas to bypass new DRM and SABR restrictions
+                addOption("--rm-cache-dir") 
                 addOption("--extractor-args", "youtube:player_client=android_vr,mweb;web:visitor_data=random")
                 
-                if (!isCollectionUrl && !url.startsWith("ytsearch")) {
+                if (!isCollectionUrl && !url.startsWith("yt")) {
                     addOption("--no-playlist")
                 }
                 
@@ -34,7 +41,7 @@ object YoutubeStreamHandler {
             }
             
             PulseLogger.updateTask("Extracting Metadata...")
-            val response = YoutubeDL.getInstance().execute(request)
+            val response = ytDlMutex.withLock { YoutubeDL.getInstance().execute(request) }
             val output = response.out
             Log.d(TAG, "Fetched metadata. Output length: ${output.length}")
             PulseLogger.updateTask("Parsing Results...")
@@ -167,29 +174,69 @@ object YoutubeStreamHandler {
         )
     }
 
+    private fun sanitizeUrl(url: String): String {
+        return url.removePrefix("pulse_placeholder:")
+                  .removePrefix("ytsearch1:official audio ")
+                  .removePrefix("ytsearch1:")
+                  .removePrefix("ytmsearch1:")
+    }
+
+    // Task: Revert to ytsearch1 due to scheme constraints, with strict Mutex and Cleanup
+    private suspend fun resolveSearchToId(query: String): String? = withContext(Dispatchers.IO) {
+        return@withContext ytDlMutex.withLock {
+            try {
+                // Task: Remove "official audio" and force ytsearch1 prefix
+                val cleanQuery = query.removePrefix("ytsearch1:official audio ")
+                                      .removePrefix("ytsearch1:")
+                                      .removePrefix("ytmsearch1:")
+                                      .replace("official audio", "", ignoreCase = true)
+                                      .trim()
+                
+                val finalQuery = "ytsearch1:$cleanQuery"
+                
+                val request = YoutubeDLRequest(finalQuery).apply {
+                    addOption("--get-id")
+                    addOption("--extractor-args", "youtube:player_client=web,mweb")
+                    addOption("--no-playlist")
+                    addOption("--no-check-certificate")
+                }
+                
+                val response = YoutubeDL.getInstance().execute(request)
+                val videoId = response.out.trim().lineSequence().firstOrNull { it.isNotBlank() }
+                Log.d(TAG, "Search resolved $finalQuery to ID: $videoId")
+                videoId
+            } catch (e: Exception) {
+                Log.e(TAG, "Search resolution failed for $query: ${e.message}")
+                null
+            }
+        }
+    }
+
     suspend fun getStreamInfo(youtubeUrl: String): StreamInfo? = withContext(Dispatchers.IO) {
-        val sanitizedUrl = youtubeUrl.removePrefix("pulse_placeholder:")
-        
-        val actualUrl = if (sanitizedUrl.startsWith("ytsearch")) {
+        // Task 1: Sanitize input URL from old prefixes in database
+        val isSearch = youtubeUrl.startsWith("ytsearch1:") || 
+                       youtubeUrl.startsWith("ytmsearch1:") || 
+                       youtubeUrl.startsWith("pulse_placeholder:yt")
+
+        val actualUrl = if (isSearch) {
             PulseLogger.updateTask("Resolving Bridge...")
-            val results = getMetadata(sanitizedUrl)
-            results.find { !it.isPlaylist }?.youtubeUrl
+            val videoId = resolveSearchToId(youtubeUrl)
+            if (videoId != null) "https://www.youtube.com/watch?v=$videoId" else null
         } else {
-            sanitizedUrl
+            youtubeUrl.removePrefix("pulse_placeholder:")
         }
 
-        if (actualUrl == null || actualUrl.startsWith("ytsearch")) {
-            PulseLogger.log("Resolution failed for: $sanitizedUrl", isError = true)
+        if (actualUrl == null || actualUrl.startsWith("yt")) {
+            PulseLogger.log("Resolution failed for: $youtubeUrl", isError = true)
             return@withContext null
         }
 
         // --- Ultra-Stealth Fallback Strategy ---
-        // Prioritizing android_test and mweb to bypass 403 Forbidden and SABR segment blocks
         val clientConfigs = listOf(
-            "youtube:player_client=android_test", // Currently the most resilient to segment-level 403s
-            "youtube:player_client=mweb",         // Reliable mobile web fallback
-            "youtube:player_client=android_vr",   // VR fallback
-            "youtube:player_client=web"           // Final desktop resort
+            "youtube:player_client=android_test", 
+            "youtube:player_client=mweb",         
+            "youtube:player_client=android_vr",   
+            "youtube:player_client=web"           
         )
 
         for ((index, clients) in clientConfigs.withIndex()) {
@@ -198,24 +245,15 @@ object YoutubeStreamHandler {
                 PulseLogger.log("Attempt ${index + 1}: Resolving with [$clients]")
                 
                 val request = YoutubeDLRequest(actualUrl).apply {
-                    if (actualUrl.startsWith("ytsearch")) {
-                        addOption("--default-search", "ytsearch1")
-                        addOption("--no-playlist")
-                        addOption("--extract-audio")
-                        addOption("--audio-format", "m4a")
-                        addOption("--extractor-args", "youtube:player_client=tv,mweb") 
-                    } else {
-                        addOption("-f", "ba/ba*")
-                    }
-                    
+                    addOption("-f", "ba/ba*")
                     addOption("--no-check-certificate")
-                    addOption("--rm-cache-dir") // Clear cache for fresh tokens
+                    addOption("--rm-cache-dir") 
                     addOption("--no-playlist")
                     addOption("--extractor-args", "$clients;web:visitor_data=random")
                 }
                 
-                // Use getInfo to retrieve both stream URL and HTTP headers (including Cookies)
-                val videoInfo = YoutubeDL.getInstance().getInfo(request)
+                // Wrap in Mutex to prevent concurrency crashes
+                val videoInfo = ytDlMutex.withLock { YoutubeDL.getInstance().getInfo(request) }
                 val directUrl = videoInfo.url
                 val headers = videoInfo.httpHeaders ?: emptyMap()
                 

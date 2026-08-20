@@ -86,7 +86,7 @@ object SpotifyResolver {
                                 }
                                 
                                 tracks.add(StreamingItem(
-                                    youtubeUrl = "ytsearch1:official audio $trackArtist - $trackTitle",
+                                    youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                     title = trackTitle,
                                     artist = trackArtist,
                                     thumbnailUrl = trackThumb ?: collectionThumb,
@@ -108,7 +108,7 @@ object SpotifyResolver {
                             }
                             
                             tracks.add(StreamingItem(
-                                youtubeUrl = "ytsearch1:official audio $trackArtist - $trackTitle",
+                                youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                 title = trackTitle,
                                 artist = trackArtist,
                                 thumbnailUrl = trackThumb ?: collectionThumb,
@@ -150,18 +150,16 @@ object SpotifyResolver {
     }
 
     private suspend fun fallbackWithMeta(url: String, apiMeta: com.example.song.data.api.SpotifyResponse?, isSingleTrack: Boolean): List<StreamingItem> {
-        PulseLogger.log("Scraper blocked. Using YouTube Bridge Fallback...", isError = true)
+        PulseLogger.log("Scraper blocked. Using YouTube Music Bridge...", isError = true)
         return try {
             val query = if (apiMeta != null) {
-                if (isSingleTrack) "official audio ${apiMeta.artist} - ${apiMeta.title}"
-                else "playlist ${apiMeta.artist} ${apiMeta.title}"
+                "${apiMeta.title} ${apiMeta.artist}"
             } else {
-                val searchTitle = url.substringAfterLast("/").substringBefore("?")
-                if (isSingleTrack) "ytsearch1:official audio $searchTitle"
-                else "ytsearch1:playlist $searchTitle"
+                url.substringAfterLast("/").substringBefore("?")
             }
             
-            val results = YoutubeStreamHandler.getMetadata(if (query.startsWith("ytsearch")) query else "ytsearch1:$query")
+            // Revert to ytsearch1: due to scheme constraints
+            val results = YoutubeStreamHandler.getMetadata("ytsearch1:$query")
             
             if (apiMeta != null) {
                 results.map { 
