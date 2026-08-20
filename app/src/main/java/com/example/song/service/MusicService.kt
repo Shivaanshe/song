@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -12,7 +13,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.ExoPlayer
@@ -47,6 +50,10 @@ class MusicService : MediaSessionService() {
     
     // 🛡️ Loop Protection: Track auto-recovery attempts per track
     private val recoveryRetries = mutableMapOf<String, Int>()
+
+    // 📋 Queue Management
+    private var currentQueue: List<Song> = emptyList()
+    private var currentIndex: Int = -1
 
     companion object {
         private const val CHANNEL_ID = "pulse_music_channel"
@@ -106,7 +113,8 @@ class MusicService : MediaSessionService() {
                 if (playbackState == Player.STATE_ENDED) {
                     val currentPos = player.currentPosition
                     if (currentPos > 1000) {
-                        android.util.Log.d("MusicService", "Song ended naturally at $currentPos. Ready for next.")
+                        android.util.Log.d("MusicService", "Song ended naturally at $currentPos. Triggering next track.")
+                        skipToNext()
                     } else {
                         android.util.Log.d("MusicService", "Player stopped or interrupted at $currentPos. Ignoring auto-skip.")
                     }
@@ -211,7 +219,9 @@ class MusicService : MediaSessionService() {
                 .build()
             
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-                .add(SessionCommand("RESOLVE_AND_PLAY", Bundle.EMPTY))
+                .add(SessionCommand("PLAY_QUEUE", Bundle.EMPTY))
+                .add(SessionCommand("SKIP_TO_NEXT", Bundle.EMPTY))
+                .add(SessionCommand("SKIP_TO_PREVIOUS", Bundle.EMPTY))
                 .build()
             
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -226,16 +236,33 @@ class MusicService : MediaSessionService() {
             customCommand: SessionCommand,
             args: Bundle
         ): ListenableFuture<SessionResult> {
-            if (customCommand.customAction == "RESOLVE_AND_PLAY") {
-                val songId = args.getInt("id")
-                val title = args.getString("title") ?: ""
-                val artist = args.getString("artist") ?: ""
-                val uri = args.getString("uri") ?: ""
-                val image = args.getString("image")
-                val song = Song(songId, title, artist, uri, image)
-                
-                playResolvedSong(song)
-                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            when (customCommand.customAction) {
+                "PLAY_QUEUE" -> {
+                    val index = args.getInt("index", 0)
+                    val songs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        args.getParcelableArrayList("songs", Song::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        args.getParcelableArrayList<Song>("songs")
+                    }
+                    
+                    if (songs != null) {
+                        currentQueue = songs
+                        currentIndex = index
+                        if (currentIndex in currentQueue.indices) {
+                            playResolvedSong(currentQueue[currentIndex])
+                        }
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                "SKIP_TO_NEXT" -> {
+                    skipToNext()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                "SKIP_TO_PREVIOUS" -> {
+                    skipToPrevious()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
         }
@@ -285,6 +312,33 @@ class MusicService : MediaSessionService() {
         player.setMediaItem(mediaItem)
         player.prepare()
         player.play()
+    }
+
+    private fun skipToNext() {
+        if (currentQueue.isEmpty()) return
+        
+        currentIndex++
+        if (currentIndex >= currentQueue.size) {
+            currentIndex = 0 // Wrap around or stop? Let's wrap for now.
+        }
+        
+        playResolvedSong(currentQueue[currentIndex])
+    }
+
+    private fun skipToPrevious() {
+        if (currentQueue.isEmpty()) return
+
+        if (player.currentPosition > 3000) {
+            player.seekTo(0)
+            return
+        }
+
+        currentIndex--
+        if (currentIndex < 0) {
+            currentIndex = currentQueue.size - 1
+        }
+        
+        playResolvedSong(currentQueue[currentIndex])
     }
 
     private fun resolveAndInjectRealStream(mediaItem: MediaItem, force: Boolean = false, isPrimary: Boolean = false) {
@@ -365,12 +419,14 @@ class MusicService : MediaSessionService() {
                             if (player.currentMediaItemIndex == targetIndex) {
                                 player.prepare()
                                 player.play()
+                                triggerNextTrackPreBuffer()
                             }
                         } else if (isPrimary && activeSongId == mediaId) {
                             // Fresh start for primary request
                             player.setMediaSource(mediaSource)
                             player.prepare()
                             player.play()
+                            triggerNextTrackPreBuffer()
                         }
                         PulseLogger.log("Handshake successful for ${mediaItem.mediaMetadata.title}")
                     }
@@ -441,6 +497,60 @@ class MusicService : MediaSessionService() {
     private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
         val uriString = mediaItem.localConfiguration?.uri.toString()
         return uriString == "https://pulse.music/placeholder"
+    }
+
+    private fun triggerNextTrackPreBuffer() {
+        val currentIndex = player.currentMediaItemIndex
+        val totalItems = player.mediaItemCount
+        if (currentIndex < totalItems - 1) {
+            val nextItem = player.getMediaItemAt(currentIndex + 1)
+            if (isYoutubePlaceholder(nextItem)) {
+                serviceScope.launch {
+                    preBufferNextTrack(nextItem)
+                }
+            }
+        }
+    }
+
+    private suspend fun preBufferNextTrack(mediaItem: MediaItem) = withContext(Dispatchers.IO) {
+        try {
+            val uriString = mediaItem.localConfiguration?.uri.toString()
+            val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
+            
+            android.util.Log.d("MusicService", "Pre-buffering next track: $youtubeUrl")
+            val streamInfo = YoutubeStreamHandler.getStreamInfo(youtubeUrl)
+            
+            if (streamInfo != null && streamInfo.url.startsWith("http")) {
+                val app = SongApplication.getInstance()
+                val dataSpec = DataSpec.Builder()
+                    .setUri(Uri.parse(streamInfo.url))
+                    .setKey(streamInfo.videoId ?: mediaItem.mediaId)
+                    .setPosition(0)
+                    .setLength(1024 * 1024) // Pre-buffer 1MB
+                    .build()
+                
+                val httpFactory = OkHttpDataSource.Factory(app.okHttpClient)
+                    .setUserAgent(streamInfo.headers["User-Agent"] ?: streamInfo.headers["user-agent"] ?: "")
+                    .setDefaultRequestProperties(streamInfo.headers)
+                
+                val cacheDataSource = CacheDataSource.Factory()
+                    .setCache(app.playerCache)
+                    .setUpstreamDataSourceFactory(httpFactory)
+                    .createDataSource()
+                
+                val cacheWriter = CacheWriter(
+                    cacheDataSource,
+                    dataSpec,
+                    null,
+                    null
+                )
+                
+                cacheWriter.cache()
+                android.util.Log.d("MusicService", "Pre-buffer complete for: ${mediaItem.mediaMetadata.title}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MusicService", "Pre-buffer failed: ${e.message}")
+        }
     }
 
     private fun resolveNearbyItems() {

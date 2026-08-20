@@ -254,7 +254,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         mediaItem?.let { item ->
                             val songId = item.mediaId.toIntOrNull()
-                            _currentPlayingSong.value = _allSongs.value.find { it.id == songId } ?: _currentQueue.value.find { it.id == songId }
+                            // Update current song from allSongs or reconstruct from metadata
+                            _currentPlayingSong.value = _allSongs.value.find { it.id == songId } ?: Song(
+                                id = songId ?: 0,
+                                title = item.mediaMetadata.title?.toString() ?: "Unknown",
+                                artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
+                                audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
+                                imageUrl = item.mediaMetadata.artworkUri?.toString()
+                            )
                         }
                     }
 
@@ -310,7 +317,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 _isPlaying.value = isPlaying
                 _currentPlayingSong.value = currentMediaItem?.let { item ->
                     val songId = item.mediaId.toIntOrNull()
-                    _allSongs.value.find { it.id == songId } ?: _currentQueue.value.find { it.id == songId }
+                    _allSongs.value.find { it.id == songId } ?: Song(
+                        id = songId ?: 0,
+                        title = item.mediaMetadata.title?.toString() ?: "Unknown",
+                        artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
+                        audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
+                        imageUrl = item.mediaMetadata.artworkUri?.toString()
+                    )
                 }
             }
             startProgressUpdate()
@@ -528,33 +541,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         if (queue.isEmpty()) return
         
         _currentQueue.value = queue
-        _currentPlayingSong.value = song
         
-        // 🛡️ Principal Fix: Hard Intercept
-        // If it's a placeholder or search, DO NOT call setMediaItems on the player yet.
-        if (song.audioUri.contains("placeholder") || song.audioUri.startsWith("yt")) {
-            mediaController?.let { controller ->
-                val args = android.os.Bundle().apply {
-                    putInt("id", song.id)
-                    putString("title", song.title)
-                    putString("artist", song.artist)
-                    putString("uri", song.audioUri)
-                    putString("image", song.imageUrl)
-                }
-                controller.sendCustomCommand(androidx.media3.session.SessionCommand("RESOLVE_AND_PLAY", android.os.Bundle.EMPTY), args)
-            }
-            return
-        }
-
+        // 📋 Task: Move Queue Management to Service
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
-        val items = queue.map { it.toMediaItem() }
         
-        mediaController?.apply {
-            val currentMode = repeatMode 
-            setMediaItems(items, index, 0L)
-            repeatMode = currentMode
-            prepare()
-            play()
+        mediaController?.let { controller ->
+            val args = android.os.Bundle().apply {
+                putParcelableArrayList("songs", ArrayList(queue))
+                putInt("index", index)
+            }
+            controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
         }
     }
 
@@ -587,16 +583,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
-        // --- Non-Blocking Resolution ---
-        // We open the player immediately with a placeholder. 
-        // MusicService will handle the background resolution and retries.
-        
         val filteredQueue = queue.filter { !it.isPlaylist }
         val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
         
-        val mediaItems = filteredQueue.map { it.toMediaItem() }
-
-        _currentQueue.value = filteredQueue.map {
+        val songQueue = filteredQueue.map {
             Song(
                 id = it.id,
                 title = it.title,
@@ -606,62 +596,24 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 duration = it.duration
             )
         }
-        _currentPlayingSong.value = _currentQueue.value.getOrNull(index)
         
-        // 🛡️ Principal Fix: Hard Intercept
-        // If it's a placeholder or search, DO NOT call setMediaItems on the player yet.
-        // Instead, we send a custom command to the service to start resolution silently.
-        val targetSong = _currentPlayingSong.value
-        if (targetSong != null && (targetSong.audioUri.contains("placeholder") || targetSong.audioUri.startsWith("yt"))) {
-            mediaController?.let { controller ->
-                val args = android.os.Bundle().apply {
-                    putInt("id", targetSong.id)
-                    putString("title", targetSong.title)
-                    putString("artist", targetSong.artist)
-                    putString("uri", targetSong.audioUri)
-                    putString("image", targetSong.imageUrl)
-                }
-                controller.sendCustomCommand(androidx.media3.session.SessionCommand("RESOLVE_AND_PLAY", android.os.Bundle.EMPTY), args)
-            }
-            return
-        }
+        _currentQueue.value = songQueue
 
-        mediaController?.apply {
-            val currentMode = repeatMode
-            setMediaItems(mediaItems, index, 0L)
-            repeatMode = currentMode
+        mediaController?.let { controller ->
+            val args = android.os.Bundle().apply {
+                putParcelableArrayList("songs", ArrayList(songQueue))
+                putInt("index", index)
+            }
+            controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
         }
     }
 
     fun skipToNext() {
-        val queue = _currentQueue.value
-        val current = _currentPlayingSong.value ?: return
-        val index = queue.indexOfFirst { it.id == current.id }
-        
-        if (index != -1 && index < queue.size - 1) {
-            playSong(queue[index + 1], queue)
-        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL && queue.isNotEmpty()) {
-            playSong(queue[0], queue)
-        }
+        mediaController?.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
     }
 
     fun skipToPrevious() {
-        val queue = _currentQueue.value
-        val current = _currentPlayingSong.value ?: return
-        val index = queue.indexOfFirst { it.id == current.id }
-        
-        mediaController?.let {
-            if (it.currentPosition > 3000) {
-                it.seekTo(0L)
-                return
-            }
-        }
-
-        if (index > 0) {
-            playSong(queue[index - 1], queue)
-        } else if (_repeatMode.value == Player.REPEAT_MODE_ALL && queue.isNotEmpty()) {
-            playSong(queue.last(), queue)
-        }
+        mediaController?.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
     }
 
     fun toggleRepeatMode() {
