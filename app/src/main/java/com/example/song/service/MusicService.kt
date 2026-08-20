@@ -1,19 +1,24 @@
 package com.example.song.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
 import com.example.song.MainActivity
 import com.example.song.SongApplication
 import com.example.song.data.model.Song
@@ -30,8 +35,16 @@ class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
-    // Track which items are currently being resolved to avoid duplicate work
-    private val resolvingIds = mutableSetOf<String>()
+    // Track active resolution jobs to allow cancellation of stale ones
+    private val activeResolutionJobs = mutableMapOf<String, Job>()
+    
+    // 🛡️ Loop Protection: Track auto-recovery attempts per track
+    private val recoveryRetries = mutableMapOf<String, Int>()
+
+    companion object {
+        private const val CHANNEL_ID = "pulse_music_channel"
+        private const val NOTIFICATION_ID = 1
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Essential for Samsung Quick Panel and Playback Resumption
@@ -41,9 +54,28 @@ class MusicService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         
+        // Task: Fix ForegroundServiceDidNotStartInTimeException
+        // We must call startForeground immediately to satisfy Android's 5s requirement,
+        // especially since yt-dlp extraction can be slow.
+        createNotificationChannel()
+        val loadingNotification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play) // Use a system icon for now
+            .setContentTitle("Pulse Music")
+            .setContentText("Initializing player...")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
+        
+        startForeground(NOTIFICATION_ID, loadingNotification)
+
         val app = SongApplication.getInstance()
         val cache = app.playerCache
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        
+        // Task: Use OkHttp for base factory with a standard mobile User-Agent
+        val baseUserAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36"
+            
+        val httpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
+            .setUserAgent(baseUserAgent)
         
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
@@ -57,6 +89,17 @@ class MusicService : MediaSessionService() {
             .build()
         
         player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateName = when(playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN"
+                }
+                android.util.Log.d("MusicService", "Player State Changed: $stateName")
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.let {
                     if (isYoutubePlaceholder(it)) {
@@ -68,19 +111,41 @@ class MusicService : MediaSessionService() {
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 PulseLogger.log("Player error: ${error.errorCodeName} - ${error.localizedMessage}", isError = true)
-                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED) {
+                
+                val currentItem = player.currentMediaItem
+                val mediaId = currentItem?.mediaId ?: "unknown"
+                val retryCount = recoveryRetries.getOrDefault(mediaId, 0)
+
+                // 🛡️ Loop Protection: If it's a 403 and we've already tried to recover once, stop and notify user.
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && 
+                    (error.localizedMessage?.contains("403") == true || error.localizedMessage?.contains("Forbidden") == true)) {
                     
-                    player.currentMediaItem?.let {
+                    if (retryCount >= 1) {
+                        PulseLogger.log("Fatal 403 error for $mediaId. Aborting to prevent loop.", isError = true)
+                        serviceScope.launch {
+                            Toast.makeText(this@MusicService, "YouTube Access Denied (403). Try another song.", Toast.LENGTH_LONG).show()
+                        }
+                        player.pause()
+                        return
+                    }
+                }
+
+                // Generic recovery for network or IO errors (limit to 1 retry)
+                if (retryCount < 1 && (
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED)) {
+                    
+                    currentItem?.let {
                         val uriString = it.localConfiguration?.uri.toString()
                         val isYoutubeSource = uriString.contains("youtube.com") || 
                                               uriString.contains("youtu.be") || 
                                               uriString.contains("googlevideo.com") ||
-                                              uriString.startsWith("pulse_placeholder:")
+                                              uriString == "https://pulse.music/placeholder"
                         
                         if (isYoutubeSource) {
-                            android.util.Log.d("MusicService", "Source error detected for YouTube track. Attempting auto-recovery...")
+                            android.util.Log.d("MusicService", "Source error detected. Attempting recovery 1/1...")
+                            recoveryRetries[mediaId] = retryCount + 1
                             resolveYoutubeUrl(it, force = true)
                         }
                     }
@@ -176,6 +241,18 @@ class MusicService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
+    private fun createNotificationChannel() {
+        val name = "Pulse Music Playback"
+        val descriptionText = "Controls for music playback"
+        val importance = NotificationManager.IMPORTANCE_LOW
+        val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
+            description = descriptionText
+            setShowBadge(false)
+        }
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         mediaSession?.run {
@@ -187,7 +264,7 @@ class MusicService : MediaSessionService() {
 
     private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
         val uriString = mediaItem.localConfiguration?.uri.toString()
-        return uriString.startsWith("pulse_placeholder:")
+        return uriString == "https://pulse.music/placeholder"
     }
 
     private fun resolveNearbyItems() {
@@ -210,11 +287,16 @@ class MusicService : MediaSessionService() {
     }
 
     private fun resolveYoutubeUrl(mediaItem: MediaItem, force: Boolean = false) {
-        if (!force && resolvingIds.contains(mediaItem.mediaId)) return
+        val mediaId = mediaItem.mediaId
         
-        resolvingIds.add(mediaItem.mediaId)
-        
-        serviceScope.launch {
+        // 🛡️ Cancel existing resolution for this same track if one is already running
+        if (!force && activeResolutionJobs.containsKey(mediaId)) {
+            android.util.Log.d("MusicService", "Resolution already in progress for $mediaId. Skipping.")
+            return
+        }
+        activeResolutionJobs[mediaId]?.cancel()
+
+        activeResolutionJobs[mediaId] = serviceScope.launch {
             try {
                 // If it's a direct URL already and we're not forcing, skip
                 val currentUri = mediaItem.localConfiguration?.uri.toString()
@@ -223,56 +305,119 @@ class MusicService : MediaSessionService() {
                 }
 
                 val uriString = mediaItem.localConfiguration?.uri.toString()
-                val youtubeUrl = if (uriString.startsWith("pulse_placeholder:")) {
-                    uriString.substringAfter("pulse_placeholder:")
-                } else {
-                    mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
-                }
+                val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
 
                 android.util.Log.d("MusicService", "Resolving URL: $youtubeUrl")
                 
                 // --- Retry Logic with Backoff ---
-                var directUrl: String? = null
+                var streamInfo: com.example.song.data.model.StreamInfo? = null
                 var retryCount = 0
                 val maxRetries = 2
 
-                while (directUrl == null && retryCount <= maxRetries) {
+                while (streamInfo == null && retryCount <= maxRetries && isActive) {
                     if (retryCount > 0) {
                         PulseLogger.log("Retry $retryCount for $youtubeUrl...")
-                        delay(2000L * retryCount) // Linear backoff
+                        delay(2000L * retryCount)
                     }
-                    directUrl = YoutubeStreamHandler.getDirectAudioUrl(youtubeUrl)
+                    streamInfo = YoutubeStreamHandler.getStreamInfo(youtubeUrl)
                     retryCount++
                 }
                 
-                if (directUrl != null) {
-                    // Find index of this item in the current playlist
-                    for (i in 0 until player.mediaItemCount) {
-                        if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
-                            val updatedItem = mediaItem.buildUpon()
-                                .setUri(directUrl)
-                                .setMediaMetadata(mediaItem.mediaMetadata) // Lock original metadata
+                if (streamInfo != null && streamInfo.url.startsWith("http")) {
+                    withContext(Dispatchers.Main) {
+                        if (!isActive) return@withContext
+
+                        // 🛡️ Double-Injection Guard: Check if the item has already been resolved by another job
+                        var targetIndex = -1
+                        for (idx in 0 until player.mediaItemCount) {
+                            val itemInPlayer = player.getMediaItemAt(idx)
+                            if (itemInPlayer.mediaId == mediaId) {
+                                // If the item at this index is NOT a placeholder, it means it was already resolved
+                                if (!isYoutubePlaceholder(itemInPlayer)) {
+                                    android.util.Log.d("MusicService", "Track $mediaId already resolved at index $idx. Skipping injection.")
+                                    return@withContext
+                                }
+                                targetIndex = idx
+                                break
+                            }
+                        }
+
+                        if (targetIndex != -1) {
+                            android.util.Log.d("MusicService", "Resolution Success. Injecting URL at index $targetIndex")
+                            
+                            val app = SongApplication.getInstance()
+                            
+                            // 🕵️ Principal Fix: Strict Header, User-Agent & Cookie Injection for OkHttp
+                            val headers = streamInfo.headers.toMutableMap()
+                            
+                            // Extract the ACTUAL User-Agent yt-dlp used for the specific player client
+                            val actualUserAgent = headers["User-Agent"] 
+                                ?: headers["user-agent"]
+                                ?: headers["User-agent"]
+                                ?: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36"
+                            
+                            // Remove User-Agent from the map to avoid override conflicts in setDefaultRequestProperties
+                            headers.remove("User-Agent")
+                            headers.remove("user-agent")
+                            headers.remove("User-agent")
+
+                            // 🛡️ Bypassing 403: Force the Referer to the actual video page
+                            headers["Referer"] = "https://www.youtube.com/watch?v=${streamInfo.videoId ?: mediaId}"
+                            headers["Origin"] = "https://www.youtube.com"
+                            
+                            val httpFactory = OkHttpDataSource.Factory(app.okHttpClient)
+                                .setUserAgent(actualUserAgent)
+                                .setDefaultRequestProperties(headers)
+                            
+                            val cacheFactory = CacheDataSource.Factory()
+                                .setCache(app.playerCache)
+                                .setUpstreamDataSourceFactory(httpFactory)
+                                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+                            val mediaItemWithHeaders = mediaItem.buildUpon()
+                                .setUri(streamInfo.url)
+                                .setCustomCacheKey(streamInfo.videoId ?: mediaId)
                                 .build()
                             
-                            player.replaceMediaItem(i, updatedItem)
+                            val mediaSource = ProgressiveMediaSource.Factory(cacheFactory)
+                                .createMediaSource(mediaItemWithHeaders)
                             
-                            // If this was the current item and we are in an error state or IDLE,
-                            // we need to re-prepare.
-                            if (player.currentMediaItemIndex == i && 
-                                (player.playbackState == Player.STATE_IDLE || player.playerError != null)) {
-                                player.prepare()
+                            android.util.Log.d("MusicService", "Handshake: Injecting at index $targetIndex with Triple-Lock Headers")
+                            PulseLogger.log("Handshake index $targetIndex with Stealth Sync")
+                            
+                            // Atomically swap the source
+                            player.addMediaSource(targetIndex, mediaSource)
+                            player.removeMediaItem(targetIndex + 1)
+                            
+                            if (player.currentMediaItemIndex == targetIndex) {
+                                // 🛡️ Important: ONLY prepare if the player is in an error or idle state
+                                if (player.playbackState == Player.STATE_IDLE || player.playerError != null) {
+                                    player.prepare()
+                                }
                                 player.play()
                             }
-                            break
                         }
                     }
                 } else {
-                    PulseLogger.log("Giving up on $youtubeUrl after retries.", isError = true)
+                    PulseLogger.log("Extraction failed: URL is null for $youtubeUrl", isError = true)
+                    
+                    withContext(Dispatchers.Main) {
+                        for (i in 0 until player.mediaItemCount) {
+                            if (player.getMediaItemAt(i).mediaId == mediaId) {
+                                PulseLogger.log("Skipping track: Resolution failed for ${mediaItem.mediaMetadata.title}", isError = true)
+                                if (player.currentMediaItemIndex == i) {
+                                    player.seekToNext()
+                                }
+                                player.removeMediaItem(i)
+                                break
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 PulseLogger.log("Resolution crashed: ${e.message}", isError = true)
             } finally {
-                resolvingIds.remove(mediaItem.mediaId)
+                activeResolutionJobs.remove(mediaId)
             }
         }
     }

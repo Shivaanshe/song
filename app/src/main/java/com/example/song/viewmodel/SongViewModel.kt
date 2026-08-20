@@ -281,7 +281,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         Log.e("SongViewModel", "Playback error: ${error.message}", error)
-                        _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                        
+                        // 🛡️ Filter UI noise: don't show error for the known placeholder UnknownHostException
+                        val isPlaceholderError = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED &&
+                                (error.localizedMessage?.contains("pulse.music") == true || error.localizedMessage?.contains("placeholder") == true)
+                        
+                        if (!isPlaceholderError) {
+                            _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                        }
                         _isPlaying.value = false
                     }
 
@@ -531,13 +538,19 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val bundle = android.os.Bundle().apply {
             putString("youtube_url", youtubeUrl)
         }
-        // Use a custom scheme to signal MusicService to resolve this.
-        // This prevents ExoPlayer from trying to 'play' a raw youtube/spotify link.
-        val safeUri = directUrl ?: "pulse_placeholder:$youtubeUrl"
+        
+        // --- Hard Validation for ExoPlayer Safety ---
+        // We set the URI to a safe dummy HTTP link if not resolved.
+        // This prevents invalid URLs from reaching ExoPlayer.
+        val safeUriString = if (!directUrl.isNullOrEmpty() && directUrl.startsWith("http")) {
+            directUrl
+        } else {
+            "https://pulse.music/placeholder"
+        }
         
         return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(Uri.parse(safeUri))
+            .setUri(Uri.parse(safeUriString))
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)

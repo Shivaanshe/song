@@ -415,13 +415,9 @@ fun GlassSlider(
                         .size(24.dp)
                         .shadow(4.dp, CircleShape)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.5f))
-                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Glassy center
-                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.3f)))
-                }
+                        .background(Color.White.copy(alpha = 0.4f))
+                        .border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape)
+                )
             },
             track = { sliderState ->
                 SliderDefaults.Track(

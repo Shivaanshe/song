@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import java.io.File
 
 class SongApplication : Application() {
@@ -34,6 +35,16 @@ class SongApplication : Application() {
 
     lateinit var repository: SongRepository
         private set
+
+    // 🌐 Shared OkHttp client for both extraction and playback
+    val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     companion object {
         private lateinit var instance: SongApplication

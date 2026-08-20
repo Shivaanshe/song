@@ -1,5 +1,6 @@
 package com.example.song.ui.components
 
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -13,11 +14,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -31,6 +36,9 @@ import com.example.song.viewmodel.SongViewModel
 fun DebugOverlay(viewModel: SongViewModel) {
     var showDialog by remember { mutableStateOf(false) }
     var showFullError by remember { mutableStateOf(false) }
+    
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     
     val playbackError by viewModel.playbackError.collectAsState()
     val extractionError by viewModel.extractionError.collectAsState()
@@ -203,7 +211,26 @@ fun DebugOverlay(viewModel: SongViewModel) {
 
                         // Section 5: System Logs
                         item {
-                            DebugSection("System Logs (Live)") {
+                            DebugSection(
+                                title = "System Logs (Live)",
+                                action = {
+                                    IconButton(
+                                        onClick = {
+                                            val allLogs = systemLogs.joinToString("\n")
+                                            clipboardManager.setText(AnnotatedString(allLogs))
+                                            Toast.makeText(context, "Logs copied!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.ContentCopy,
+                                            contentDescription = "Copy Logs",
+                                            tint = Color(0xFF81C784),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            ) {
                                 Box(
                                     modifier = Modifier
                                         .height(200.dp)
@@ -252,9 +279,20 @@ fun DebugOverlay(viewModel: SongViewModel) {
 }
 
 @Composable
-fun DebugSection(title: String, content: @Composable () -> Unit) {
+fun DebugSection(
+    title: String, 
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = Color(0xFF81C784), fontWeight = FontWeight.ExtraBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, style = MaterialTheme.typography.labelMedium, color = Color(0xFF81C784), fontWeight = FontWeight.ExtraBold)
+            action?.invoke()
+        }
         Spacer(modifier = Modifier.height(8.dp))
         content()
     }
