@@ -32,6 +32,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE isFavorite = 1")
     fun getFavoriteSongs(): Flow<List<Song>>
 
+    @Query("SELECT * FROM songs WHERE id IN (:songIds)")
+    suspend fun getSongsByIdsSync(songIds: List<Int>): List<Song>
+
     @Query("DELETE FROM songs WHERE id = :songId")
     suspend fun deleteSong(songId: Int)
 }

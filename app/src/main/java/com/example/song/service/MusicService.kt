@@ -7,20 +7,18 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.okhttp.OkHttpDataSource
-import okhttp3.OkHttpClient
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -33,6 +31,8 @@ import com.example.song.util.YoutubeStreamHandler
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 
 @UnstableApi
 class MusicService : MediaSessionService() {
@@ -41,27 +41,17 @@ class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
-    // Track active resolution jobs to allow cancellation of stale ones
-    private val activeResolutionJobs = mutableMapOf<String, Job>()
-    
-    // 🛡️ Principal Guard: Track the current active request to prevent ghost hijacking
-    private var primaryResolutionJob: Job? = null
-    private var activeSongId: String? = null
-    
-    // 🛡️ Loop Protection: Track auto-recovery attempts per track
-    private val recoveryRetries = mutableMapOf<String, Int>()
-
-    // 📋 Queue Management
+    private lateinit var httpDataSourceFactory: OkHttpDataSource.Factory
+    private val resolvingIds = mutableSetOf<String>()
     private var currentQueue: List<Song> = emptyList()
-    private var currentIndex: Int = -1
+    private val recoveryRetries = mutableMapOf<String, Int>()
+    
+    private var consecutiveFailures = 0
 
     companion object {
         private const val CHANNEL_ID = "pulse_music_channel"
         private const val NOTIFICATION_ID = 1
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return super.onStartCommand(intent, flags, startId)
+        private const val TAG = "PulseDebug"
     }
 
     override fun onCreate() {
@@ -81,112 +71,67 @@ class MusicService : MediaSessionService() {
         val app = SongApplication.getInstance()
         val cache = app.playerCache
         
-        // Base factory with standard mobile User-Agent
-        val baseUserAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36"
-            
-        val httpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
-            .setUserAgent(baseUserAgent)
+        // 🛡️ Critical Fix: Do NOT call setUserAgent() on the factory.
+        // Doing so locks the factory to a single User-Agent and ignores 
+        // headers set via setDefaultRequestProperties.
+        httpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
         
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(httpDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-        val dataSourceFactory = DefaultMediaSourceFactory(this).setDataSourceFactory(cacheDataSourceFactory)
-
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(dataSourceFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(cacheDataSourceFactory))
             .build()
         
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                val stateName = when(playbackState) {
-                    Player.STATE_IDLE -> "IDLE"
-                    Player.STATE_BUFFERING -> "BUFFERING"
-                    Player.STATE_READY -> "READY"
-                    Player.STATE_ENDED -> "ENDED"
-                    else -> "UNKNOWN"
-                }
-                android.util.Log.d("MusicService", "Player State Changed: $stateName")
-
-                // 🛡️ Auto-Advance Fix: If a song finishes playing, manually trigger next
                 if (playbackState == Player.STATE_ENDED) {
                     val currentPos = player.currentPosition
                     if (currentPos > 1000) {
-                        android.util.Log.d("MusicService", "Song ended naturally at $currentPos. Triggering next track.")
+                        Log.d(TAG, "Song ended naturally. Skipping to next.")
                         skipToNext()
-                    } else {
-                        android.util.Log.d("MusicService", "Player stopped or interrupted at $currentPos. Ignoring auto-skip.")
                     }
                 }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                mediaItem?.let {
-                    if (isYoutubePlaceholder(it)) {
-                        android.util.Log.d("MusicService", "Hard Intercept: Blocking placeholder from ExoPlayer.")
-                        
-                        // Update active state to this new placeholder track
-                        activeSongId = it.mediaId
-                        primaryResolutionJob?.cancel()
-                        
-                        player.stop() 
-                        player.clearMediaItems() // Ensure total cleanup
-                        
-                        resolveAndInjectRealStream(it, isPrimary = true)
-                    } else {
-                        resolveNearbyItems()
-                    }
+                if (mediaItem == null) return
+                val uriString = mediaItem.localConfiguration?.uri?.toString() ?: ""
+                Log.d(TAG, "onMediaItemTransition: mediaId=${mediaItem.mediaId}, uri=$uriString")
+                
+                if (uriString.contains("pulse_placeholder:")) {
+                    resolveYoutubeUrl(mediaItem)
                 }
+                resolveNearbyItems()
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val currentItem = player.currentMediaItem
+                val uriString = currentItem?.localConfiguration?.uri?.toString() ?: ""
                 
-                // Task 1: Ignore errors from placeholder URLs
-                if (currentItem != null && isYoutubePlaceholder(currentItem)) {
-                    android.util.Log.d("MusicService", "Ignoring expected error from placeholder URL.")
-                    player.stop()
+                if (uriString.contains("pulse_placeholder:")) {
+                    Log.d(TAG, "onPlayerError caught Malformed URL. Triggering auto-recovery.")
+                    player.pause()
+                    serviceScope.launch(Dispatchers.Main) {
+                        resolveYoutubeUrl(currentItem!!, force = false)
+                    }
                     return
                 }
 
-                PulseLogger.log("Player error: ${error.errorCodeName} - ${error.localizedMessage}", isError = true)
-                
+                PulseLogger.log("Player error: ${error.errorCodeName}", isError = true)
                 val mediaId = currentItem?.mediaId ?: "unknown"
                 val retryCount = recoveryRetries.getOrDefault(mediaId, 0)
 
-                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS && 
-                    (error.localizedMessage?.contains("403") == true || error.localizedMessage?.contains("Forbidden") == true)) {
-                    
-                    if (retryCount >= 1) {
-                        PulseLogger.log("Fatal 403 error for $mediaId. Aborting to prevent loop.", isError = true)
-                        serviceScope.launch {
-                            Toast.makeText(this@MusicService, "YouTube Access Denied (403). Try another song.", Toast.LENGTH_LONG).show()
-                        }
-                        player.pause()
-                        return
-                    }
-                }
-
                 if (retryCount < 1 && (
                     error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED)) {
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
                     
                     currentItem?.let {
-                        val uriString = it.localConfiguration?.uri.toString()
-                        val isYoutubeSource = uriString.contains("youtube.com") || 
-                                              uriString.contains("youtu.be") || 
-                                              uriString.contains("googlevideo.com") ||
-                                              uriString == "https://pulse.music/placeholder"
-                        
-                        if (isYoutubeSource) {
-                            android.util.Log.d("MusicService", "Source error detected. Attempting recovery 1/1...")
-                            recoveryRetries[mediaId] = retryCount + 1
-                            
-                            // If this was the active song, treat recovery as primary
-                            val isCurrentActive = activeSongId == mediaId
-                            resolveAndInjectRealStream(it, force = true, isPrimary = isCurrentActive)
+                        recoveryRetries[mediaId] = retryCount + 1
+                        serviceScope.launch(Dispatchers.Main) {
+                            resolveYoutubeUrl(it, force = false)
                         }
                     }
                 }
@@ -194,63 +139,84 @@ class MusicService : MediaSessionService() {
         })
 
         val sessionActivityPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
 
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(MediaSessionCallback())
             .build()
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Forcing yt-dlp binary update...")
+                com.yausername.youtubedl_android.YoutubeDL.getInstance().updateYoutubeDL(applicationContext, com.yausername.youtubedl_android.YoutubeDL.UpdateChannel.STABLE)
+                Log.d(TAG, "yt-dlp update check finished.")
+            } catch (_: Exception) {}
+        }
     }
 
     private inner class MediaSessionCallback : MediaSession.Callback {
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo
-        ): MediaSession.ConnectionResult {
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_PLAY_PAUSE)
                 .add(Player.COMMAND_SEEK_TO_NEXT)
                 .add(Player.COMMAND_SEEK_TO_PREVIOUS)
                 .add(Player.COMMAND_GET_METADATA)
                 .build()
-            
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
                 .add(SessionCommand("PLAY_QUEUE", Bundle.EMPTY))
                 .add(SessionCommand("SKIP_TO_NEXT", Bundle.EMPTY))
                 .add(SessionCommand("SKIP_TO_PREVIOUS", Bundle.EMPTY))
                 .build()
-            
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailablePlayerCommands(playerCommands)
                 .setAvailableSessionCommands(sessionCommands)
                 .build()
         }
 
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle
-        ): ListenableFuture<SessionResult> {
+        override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
             when (customCommand.customAction) {
                 "PLAY_QUEUE" -> {
                     val index = args.getInt("index", 0)
-                    val songs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        args.getParcelableArrayList("songs", Song::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        args.getParcelableArrayList<Song>("songs")
-                    }
+                    val ids = args.getIntegerArrayList("ids") ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
+                    val isStreaming = args.getBoolean("isStreaming", false)
                     
-                    if (songs != null) {
-                        currentQueue = songs
-                        currentIndex = index
-                        if (currentIndex in currentQueue.indices) {
-                            playResolvedSong(currentQueue[currentIndex])
+                    serviceScope.launch {
+                        val repository = SongApplication.getInstance().repository
+                        val songs = if (isStreaming) {
+                            repository.getStreamingItemsByIdsSync(ids).map { it.toSong() }
+                        } else {
+                            repository.getSongsByIdsSync(ids)
+                        }
+                        
+                        if (songs.isNotEmpty()) {
+                            Log.d(TAG, "Queue mapping started for ${songs.size} items")
+                            val dummyMediaItems = songs.map { song ->
+                                val query = "ytsearch1:${song.title} ${song.artist}"
+                                val metadata = MediaMetadata.Builder()
+                                    .setTitle(song.title)
+                                    .setArtist(song.artist)
+                                    .setExtras(Bundle().apply { 
+                                        putString("custom_artwork_url", song.imageUrl)
+                                        putString("search_query", query)
+                                    })
+                                    .build()
+                                
+                                MediaItem.Builder()
+                                    .setMediaId(song.id.toString())
+                                    .setUri("pulse_placeholder:$query")
+                                    .setMediaMetadata(metadata)
+                                    .build()
+                            }
+                            Log.d(TAG, "Queue mapping finished.")
+                            
+                            currentQueue = songs
+                            withContext(Dispatchers.Main) {
+                                player.setMediaItems(dummyMediaItems, index, 0L)
+                                player.prepare()
+                                player.play()
+                            }
                         }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -267,10 +233,7 @@ class MusicService : MediaSessionService() {
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
         }
 
-        override fun onPlaybackResumption(
-            mediaSession: MediaSession,
-            controller: MediaSession.ControllerInfo
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             val settableFuture = com.google.common.util.concurrent.SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
                 val repository = SongApplication.getInstance().repository
@@ -285,284 +248,192 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    private fun playResolvedSong(song: Song) {
-        val songId = song.id.toString()
-        activeSongId = songId
-        
-        // 1. Always stop any previous background primary job
-        primaryResolutionJob?.cancel()
+    private fun resolveYoutubeUrl(mediaItem: MediaItem, force: Boolean = false) {
+        if (!force && resolvingIds.contains(mediaItem.mediaId)) return
+        resolvingIds.add(mediaItem.mediaId)
 
-        // 2. HARD INTERCEPT: If it's a placeholder or search, DO NOT touch ExoPlayer with dummy URL.
-        if (song.audioUri.contains("pulse.music/placeholder") || song.audioUri.startsWith("yt")) {
-            android.util.Log.d("MusicService", "Hard Intercept: Blocking dummy URL. Stopping player.")
-            
-            // Forcibly clear player to ensure old audio stops immediately
-            player.stop()
-            player.clearMediaItems()
-            
-            primaryResolutionJob = serviceScope.launch {
-                // Background resolution phase
-                resolveAndInjectRealStream(song.toMediaItem(), isPrimary = true)
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                val isActiveTrack = player.currentMediaItem?.mediaId == mediaItem.mediaId
+                
+                withContext(Dispatchers.IO) {
+                    if (isActiveTrack) {
+                        Log.d(TAG, "Active track requesting Mutex: ${mediaItem.mediaMetadata.title}")
+                    } else {
+                        Log.d(TAG, "Background track delaying 1.5s: ${mediaItem.mediaMetadata.title}")
+                        delay(1500)
+                    }
+
+                    val currentUri = mediaItem.localConfiguration?.uri.toString()
+                    if (!force && currentUri.contains("googlevideo.com")) return@withContext
+
+                    val query = mediaItem.mediaMetadata.extras?.getString("search_query") 
+                        ?: currentUri.substringAfter("pulse_placeholder:")
+                        
+                    val cleanQuery = query.replace("official audio", "", ignoreCase = true).trim()
+                    
+                    val info = YoutubeStreamHandler.ytDlMutex.withLock {
+                        try {
+                            val processId = UUID.randomUUID().toString()
+                            Log.d(TAG, "Burner thread launched for extraction.")
+                            
+                            val burnerJob = CoroutineScope(Dispatchers.IO).async {
+                                try {
+                                    YoutubeStreamHandler.getStreamInfo(cleanQuery, processId)
+                                } catch (_: Exception) { null }
+                            }
+
+                            val result = withTimeoutOrNull(35000L) {
+                                burnerJob.await()
+                            }
+
+                            if (result == null) {
+                                Log.d(TAG, "FATAL: Extraction timed out after 35s. Abandoning zombie thread and releasing Mutex for: $cleanQuery")
+                                com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
+                                burnerJob.cancel()
+                                
+                                if (isActiveTrack) {
+                                    consecutiveFailures++
+                                    if (consecutiveFailures >= 10) {
+                                        Log.e(TAG, "Circuit Breaker Tripped. Extraction Engine Offline.")
+                                        withContext(Dispatchers.Main) {
+                                            player.pause()
+                                            resolvingIds.clear()
+                                            Toast.makeText(this@MusicService, "Extraction Engine Offline. Check Network.", Toast.LENGTH_LONG).show()
+                                        }
+                                    } else {
+                                        Log.d(TAG, "Extraction failed for ACTIVE track. Auto-skipping to next song.")
+                                        withContext(Dispatchers.Main) {
+                                            player.seekToNext()
+                                            player.prepare()
+                                            player.play()
+                                        }
+                                    }
+                                } else {
+                                    Log.d(TAG, "Extraction failed or timed out for background track. Abandoning silently.")
+                                }
+                                null
+                            } else {
+                                consecutiveFailures = 0
+                                Log.d(TAG, "Extraction SUCCESS for: $cleanQuery")
+                                Log.d(TAG, "Extraction successful. Switching to Main thread for ExoPlayer injection.")
+                                withContext(Dispatchers.Main) {
+                                    Log.d(TAG, "Main thread acquired. Executing replaceMediaItem for: ${mediaItem.mediaMetadata.title}")
+                                    
+                                    // 🛡️ Triple-Lock Header Injection
+                                    val headers = result.headers.toMutableMap()
+                                    if (!headers.containsKey("Referer")) {
+                                        headers["Referer"] = "https://www.youtube.com/watch?v=${result.videoId ?: ""}"
+                                    }
+                                    httpDataSourceFactory.setDefaultRequestProperties(headers)
+                                    
+                                    val updatedItem = mediaItem.buildUpon()
+                                        .setUri(result.url)
+                                        .setCustomCacheKey(mediaItem.mediaId)
+                                        .setMediaMetadata(mediaItem.mediaMetadata)
+                                        .build()
+
+                                    for (i in 0 until player.mediaItemCount) {
+                                        if (player.getMediaItemAt(i).mediaId == mediaItem.mediaId) {
+                                            Log.d(TAG, "Executing replaceMediaItem at index $i")
+                                            player.replaceMediaItem(i, updatedItem)
+
+                                            if (player.currentMediaItemIndex == i) {
+                                                Log.d(TAG, "Active track jumpstarted. Calling prepare() and play().")
+                                                player.prepare()
+                                                player.play()
+                                            }
+                                            resolveNearbyItems()
+                                            break
+                                        }
+                                    }
+                                }
+                                result
+                            }
+                        } finally {
+                            Log.d(TAG, "Lock released for: $cleanQuery")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Resolution failed: ${e.message}")
+            } finally {
+                resolvingIds.remove(mediaItem.mediaId)
             }
-            return
         }
-
-        // 3. Normal Playback (Reached only for local files or already direct links)
-        val mediaItem = song.toMediaItem()
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
     }
 
     private fun skipToNext() {
-        if (currentQueue.isEmpty()) return
-        
-        currentIndex++
-        if (currentIndex >= currentQueue.size) {
-            currentIndex = 0 // Wrap around or stop? Let's wrap for now.
+        val nextIndex = player.currentMediaItemIndex + 1
+        if (nextIndex < player.mediaItemCount) {
+            player.seekToDefaultPosition(nextIndex)
         }
-        
-        playResolvedSong(currentQueue[currentIndex])
     }
 
     private fun skipToPrevious() {
-        if (currentQueue.isEmpty()) return
-
         if (player.currentPosition > 3000) {
             player.seekTo(0)
             return
         }
-
-        currentIndex--
-        if (currentIndex < 0) {
-            currentIndex = currentQueue.size - 1
+        val prevIndex = player.currentMediaItemIndex - 1
+        if (prevIndex >= 0) {
+            player.seekToDefaultPosition(prevIndex)
         }
-        
-        playResolvedSong(currentQueue[currentIndex])
     }
 
-    private fun resolveAndInjectRealStream(mediaItem: MediaItem, force: Boolean = false, isPrimary: Boolean = false) {
-        val mediaId = mediaItem.mediaId
-        
-        // If this is a secondary background pre-fetch, use the existing map logic
-        if (!isPrimary) {
-            if (!force && activeResolutionJobs.containsKey(mediaId)) return
-            activeResolutionJobs[mediaId]?.cancel()
-        }
-
-        val resolutionTask = serviceScope.launch {
-            try {
-                val uriString = mediaItem.localConfiguration?.uri.toString()
-                val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
-
-                android.util.Log.d("MusicService", "Resolving URL: $youtubeUrl")
-                
-                var streamInfo: com.example.song.data.model.StreamInfo? = null
-                var retryCount = 0
-                val maxRetries = 2
-
-                while (streamInfo == null && retryCount <= maxRetries && isActive) {
-                    if (retryCount > 0) delay(2000L * retryCount)
-                    streamInfo = YoutubeStreamHandler.getStreamInfo(youtubeUrl)
-                    retryCount++
-                }
-                
-                // 🛡️ State Guard: Verify this song is still the active one before injecting
-                if (isPrimary && activeSongId != mediaId) {
-                    android.util.Log.w("MusicService", "Resolution finished late for $mediaId, but active song is $activeSongId. Aborting.")
-                    return@launch
-                }
-
-                if (streamInfo != null && streamInfo.url.startsWith("http")) {
-                    withContext(Dispatchers.Main) {
-                        if (!isActive) return@withContext
-
-                        var targetIndex = -1
-                        for (idx in 0 until player.mediaItemCount) {
-                            if (player.getMediaItemAt(idx).mediaId == mediaId) {
-                                targetIndex = idx
-                                break
-                            }
-                        }
-
-                        val app = SongApplication.getInstance()
-                        val headers = streamInfo.headers.toMutableMap()
-                        val actualUserAgent = headers["User-Agent"] ?: headers["user-agent"] ?: headers["User-agent"]
-                            ?: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36"
-                        
-                        headers.remove("User-Agent")
-                        headers.remove("user-agent")
-                        headers.remove("User-agent")
-                        headers["Referer"] = "https://www.youtube.com/watch?v=${streamInfo.videoId ?: mediaId}"
-                        headers["Origin"] = "https://www.youtube.com"
-                        
-                        val httpFactory = OkHttpDataSource.Factory(app.okHttpClient)
-                            .setUserAgent(actualUserAgent)
-                            .setDefaultRequestProperties(headers)
-                        
-                        val cacheFactory = CacheDataSource.Factory()
-                            .setCache(app.playerCache)
-                            .setUpstreamDataSourceFactory(httpFactory)
-                            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
-                        val mediaItemWithHeaders = mediaItem.buildUpon()
-                            .setUri(streamInfo.url)
-                            .setCustomCacheKey(streamInfo.videoId ?: mediaId)
-                            .build()
-                        
-                        val mediaSource = ProgressiveMediaSource.Factory(cacheFactory)
-                            .createMediaSource(mediaItemWithHeaders)
-
-                        if (targetIndex != -1) {
-                            player.addMediaSource(targetIndex, mediaSource)
-                            player.removeMediaItem(targetIndex + 1)
-                            if (player.currentMediaItemIndex == targetIndex) {
-                                player.prepare()
-                                player.play()
-                                triggerNextTrackPreBuffer()
-                            }
-                        } else if (isPrimary && activeSongId == mediaId) {
-                            // Fresh start for primary request
-                            player.setMediaSource(mediaSource)
-                            player.prepare()
-                            player.play()
-                            triggerNextTrackPreBuffer()
-                        }
-                        PulseLogger.log("Handshake successful for ${mediaItem.mediaMetadata.title}")
+    private fun resolveNearbyItems() {
+        serviceScope.launch(Dispatchers.Main) {
+            val currentIndex = player.currentMediaItemIndex
+            val totalItems = player.mediaItemCount
+            val indices = listOf(currentIndex + 1, currentIndex + 2, currentIndex - 1)
+            for (i in indices) {
+                if (i in 0 until totalItems) {
+                    val item = player.getMediaItemAt(i)
+                    if (item.localConfiguration?.uri?.toString()?.contains("pulse_placeholder:") == true) {
+                        val query = item.mediaMetadata.extras?.getString("search_query") 
+                            ?: item.localConfiguration?.uri?.toString()?.substringAfter("pulse_placeholder:") ?: "unknown"
+                        Log.d(TAG, "Background track delaying 1.5s before requesting Mutex: $query")
+                        resolveYoutubeUrl(item)
                     }
-                } else {
-                    PulseLogger.log("Extraction failed for ${mediaItem.mediaMetadata.title}", isError = true)
-                }
-            } catch (e: Exception) {
-                PulseLogger.log("Resolution crashed: ${e.message}", isError = true)
-            } finally {
-                if (isPrimary) {
-                    if (activeSongId == mediaId) primaryResolutionJob = null
-                } else {
-                    activeResolutionJobs.remove(mediaId)
                 }
             }
         }
+    }
 
-        if (isPrimary) {
-            primaryResolutionJob = resolutionTask
-        } else {
-            activeResolutionJobs[mediaId] = resolutionTask
-        }
+    private fun com.example.song.data.model.StreamingItem.toSong(): Song {
+        return Song(id = id, title = title, artist = artist ?: "Unknown Artist", audioUri = youtubeUrl, imageUrl = thumbnailUrl, duration = duration)
     }
 
     private fun Song.toMediaItem(): MediaItem {
-        val uri = if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
-            Uri.parse(audioUri)
-        } else {
-            Uri.fromFile(java.io.File(audioUri))
-        }
-
+        val query = "ytsearch1:$title $artist"
         return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(uri)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(artist)
-                    .setArtworkUri(imageUrl?.let { Uri.parse(it) })
-                    .setExtras(Bundle().apply { putString("youtube_url", audioUri) })
-                    .build()
-            )
+            .setUri("pulse_placeholder:$query")
+            .setMediaMetadata(MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setExtras(Bundle().apply { 
+                    putString("custom_artwork_url", imageUrl)
+                    putString("search_query", query)
+                })
+                .build())
             .build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
-
     private fun createNotificationChannel() {
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Pulse Music Playback", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Controls for music playback"
-                setShowBadge(false)
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "Pulse Music", NotificationManager.IMPORTANCE_LOW)
             notificationManager.createNotificationChannel(channel)
         }
     }
 
     override fun onDestroy() {
         serviceScope.cancel()
-        mediaSession?.run {
-            player.release()
-            release()
-        }
+        player.release()
+        mediaSession?.release()
         super.onDestroy()
     }
-
-    private fun isYoutubePlaceholder(mediaItem: MediaItem): Boolean {
-        val uriString = mediaItem.localConfiguration?.uri.toString()
-        return uriString == "https://pulse.music/placeholder"
-    }
-
-    private fun triggerNextTrackPreBuffer() {
-        val currentIndex = player.currentMediaItemIndex
-        val totalItems = player.mediaItemCount
-        if (currentIndex < totalItems - 1) {
-            val nextItem = player.getMediaItemAt(currentIndex + 1)
-            if (isYoutubePlaceholder(nextItem)) {
-                serviceScope.launch {
-                    preBufferNextTrack(nextItem)
-                }
-            }
-        }
-    }
-
-    private suspend fun preBufferNextTrack(mediaItem: MediaItem) = withContext(Dispatchers.IO) {
-        try {
-            val uriString = mediaItem.localConfiguration?.uri.toString()
-            val youtubeUrl = mediaItem.mediaMetadata.extras?.getString("youtube_url") ?: uriString
-            
-            android.util.Log.d("MusicService", "Pre-buffering next track: $youtubeUrl")
-            val streamInfo = YoutubeStreamHandler.getStreamInfo(youtubeUrl)
-            
-            if (streamInfo != null && streamInfo.url.startsWith("http")) {
-                val app = SongApplication.getInstance()
-                val dataSpec = DataSpec.Builder()
-                    .setUri(Uri.parse(streamInfo.url))
-                    .setKey(streamInfo.videoId ?: mediaItem.mediaId)
-                    .setPosition(0)
-                    .setLength(1024 * 1024) // Pre-buffer 1MB
-                    .build()
-                
-                val httpFactory = OkHttpDataSource.Factory(app.okHttpClient)
-                    .setUserAgent(streamInfo.headers["User-Agent"] ?: streamInfo.headers["user-agent"] ?: "")
-                    .setDefaultRequestProperties(streamInfo.headers)
-                
-                val cacheDataSource = CacheDataSource.Factory()
-                    .setCache(app.playerCache)
-                    .setUpstreamDataSourceFactory(httpFactory)
-                    .createDataSource()
-                
-                val cacheWriter = CacheWriter(
-                    cacheDataSource,
-                    dataSpec,
-                    null,
-                    null
-                )
-                
-                cacheWriter.cache()
-                android.util.Log.d("MusicService", "Pre-buffer complete for: ${mediaItem.mediaMetadata.title}")
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("MusicService", "Pre-buffer failed: ${e.message}")
-        }
-    }
-
-    private fun resolveNearbyItems() {
-        val currentIndex = player.currentMediaItemIndex
-        val totalItems = player.mediaItemCount
-        if (totalItems == 0) return
-        val nextIndex = currentIndex + 1
-        if (nextIndex < totalItems) {
-            val item = player.getMediaItemAt(nextIndex)
-            if (isYoutubePlaceholder(item)) {
-                resolveAndInjectRealStream(item)
-            }
-        }
-    }
+    
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 }

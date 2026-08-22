@@ -169,6 +169,14 @@ class SongRepository(
         songDao.getFirstSongSync()
     }
 
+    suspend fun getSongsByIdsSync(ids: List<Int>): List<Song> = withContext(Dispatchers.IO) {
+        songDao.getSongsByIdsSync(ids)
+    }
+
+    suspend fun getStreamingItemsByIdsSync(ids: List<Int>): List<StreamingItem> = withContext(Dispatchers.IO) {
+        streamingDao.getItemsByIdsSync(ids)
+    }
+
     suspend fun fetchArtwork(title: String, artist: String): String? = withContext(Dispatchers.IO) {
         try {
             val query = "$title $artist"

@@ -5,6 +5,7 @@ import android.util.Log
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -260,7 +261,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                                 title = item.mediaMetadata.title?.toString() ?: "Unknown",
                                 artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
                                 audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
-                                imageUrl = item.mediaMetadata.artworkUri?.toString()
+                                imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url") // 🛡️ Task: Extract from extras
                             )
                         }
                     }
@@ -284,27 +285,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                             _duration.value = duration
                             _playbackError.value = null
                         }
-                        
-                        // 🛡️ Task: Fix Auto-Skip Guard
-                        // Only auto-skip if the song actually played (pos > 1s).
-                        // This prevents stops from the Hard Intercept from skipping tracks.
-                        if (playbackState == Player.STATE_ENDED) {
-                            if (currentPosition > 1000) {
-                                skipToNext()
-                            }
-                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        Log.e("SongViewModel", "Playback error: ${error.message}", error)
+                        val currentItem = mediaController?.currentMediaItem
+                        val uriString = currentItem?.localConfiguration?.uri?.toString() ?: ""
                         
-                        // 🛡️ Filter UI noise: don't show error for the known placeholder UnknownHostException
-                        val isPlaceholderError = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED &&
-                                (error.localizedMessage?.contains("pulse.music") == true || error.localizedMessage?.contains("placeholder") == true)
-                        
-                        if (!isPlaceholderError) {
-                            _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                        if (uriString.contains("pulse_placeholder:")) {
+                            Log.d("PulseDebug", "ViewModel intercepted placeholder error. Masking UI as Buffering.")
+                            // Do not set _playbackError, effectively masking it from the user
+                            return
                         }
+
+                        Log.e("SongViewModel", "Playback error: ${error.message}", error)
+                        _playbackError.value = "Playback Error: ${error.localizedMessage}"
                         _isPlaying.value = false
                     }
 
@@ -322,7 +316,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         title = item.mediaMetadata.title?.toString() ?: "Unknown",
                         artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
                         audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
-                        imageUrl = item.mediaMetadata.artworkUri?.toString()
+                        imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url") // 🛡️ Task: Extract from extras
                     )
                 }
             }
@@ -542,30 +536,32 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         
         _currentQueue.value = queue
         
-        // 📋 Task: Move Queue Management to Service
+        // 📋 Task: Move Queue Management to Service (ID-Only to avoid TransactionTooLargeException)
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+        val ids = ArrayList(queue.map { it.id })
         
         mediaController?.let { controller ->
             val args = android.os.Bundle().apply {
-                putParcelableArrayList("songs", ArrayList(queue))
+                putIntegerArrayList("ids", ids)
                 putInt("index", index)
+                putBoolean("isStreaming", false)
             }
             controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
         }
     }
 
     private fun StreamingItem.toMediaItem(directUrl: String? = null): MediaItem {
-        val bundle = android.os.Bundle().apply {
+        val bundle = Bundle().apply {
             putString("youtube_url", youtubeUrl)
+            putString("custom_artwork_url", thumbnailUrl) 
         }
         
         // --- Hard Validation for ExoPlayer Safety ---
-        // We set the URI to a safe dummy HTTP link if not resolved.
-        // This prevents invalid URLs from reaching ExoPlayer.
+        // We set the URI to a safe local asset link if not resolved.
         val safeUriString = if (!directUrl.isNullOrEmpty() && directUrl.startsWith("http")) {
             directUrl
         } else {
-            "https://pulse.music/placeholder"
+            "asset:///pulse_placeholder_$id.mp3"
         }
         
         return MediaItem.Builder()
@@ -575,7 +571,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 MediaMetadata.Builder()
                     .setTitle(title)
                     .setArtist(artist ?: "YouTube")
-                    .setArtworkUri(thumbnailUrl?.let { Uri.parse(it) })
+                    // 🛡️ Task: Removed ArtworkUri to prevent SocketTimeoutException in MediaSession
                     .setExtras(bundle)
                     .build()
             )
@@ -585,8 +581,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
         val filteredQueue = queue.filter { !it.isPlaylist }
         val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
+        val ids = ArrayList(filteredQueue.map { it.id })
         
-        val songQueue = filteredQueue.map {
+        _currentQueue.value = filteredQueue.map {
             Song(
                 id = it.id,
                 title = it.title,
@@ -596,24 +593,39 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 duration = it.duration
             )
         }
-        
-        _currentQueue.value = songQueue
 
         mediaController?.let { controller ->
             val args = android.os.Bundle().apply {
-                putParcelableArrayList("songs", ArrayList(songQueue))
+                putIntegerArrayList("ids", ids)
                 putInt("index", index)
+                putBoolean("isStreaming", true)
             }
             controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
         }
     }
 
     fun skipToNext() {
-        mediaController?.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+        mediaController?.let { controller ->
+            if (controller.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT)) {
+                controller.seekToNext()
+            } else {
+                // 🛡️ Skip-Override: Fallback for Error/Disabled states
+                Log.d("PulseDebug", "seekToNext rejected. Triggering skip-override.")
+                controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+            }
+        }
     }
 
     fun skipToPrevious() {
-        mediaController?.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+        mediaController?.let { controller ->
+            if (controller.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS)) {
+                controller.seekToPrevious()
+            } else {
+                // 🛡️ Skip-Override: Fallback for Error/Disabled states
+                Log.d("PulseDebug", "seekToPrevious rejected. Triggering skip-override.")
+                controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+            }
+        }
     }
 
     fun toggleRepeatMode() {
@@ -800,7 +812,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun Song.toMediaItem(): MediaItem {
-        val uri = if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
+        val query = "ytsearch1:$title $artist"
+        val safeUri = if (audioUri.contains("pulse.music") || audioUri.startsWith("yt")) {
+            Uri.parse("pulse_placeholder:$query")
+        } else if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
             Uri.parse(audioUri)
         } else {
             Uri.fromFile(File(audioUri))
@@ -808,12 +823,17 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
         return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(uri)
+            .setUri(safeUri)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
                     .setArtist(artist)
-                    .setArtworkUri(imageUrl?.let { Uri.parse(it) })
+                    .setExtras(Bundle().apply {
+                        putString("youtube_url", audioUri)
+                        putString("search_query", query)
+                        putString("custom_artwork_url", imageUrl)
+                        putString("artwork_url", imageUrl)
+                    })
                     .build()
             )
             .build()
