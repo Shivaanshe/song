@@ -221,11 +221,14 @@ class MusicService : MediaSessionService() {
                 
                 serviceScope.launch {
                     val repository = SongApplication.getInstance().repository
-                    val songs = if (isStreaming) {
+                    val unsortedSongs = if (isStreaming) {
                         repository.getStreamingItemsByIdsSync(ids).map { it.toSong() }
                     } else {
                         repository.getSongsByIdsSync(ids)
                     }
+                    
+                    // 🛡️ Critical Fix: Manually sort the songs to match the order of 'ids' from the UI
+                    val songs = ids.mapNotNull { id -> unsortedSongs.find { it.id == id } }
                     
                     if (songs.isNotEmpty()) {
                         PulseLogger.log("Queue mapping: ${songs.size} items JIT-Ready")

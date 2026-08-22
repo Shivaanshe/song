@@ -56,8 +56,8 @@ fun DebugOverlay(viewModel: SongViewModel) {
         SmallFloatingActionButton(
             onClick = { showDialog = true },
             modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 4.dp)
+                .align(Alignment.BottomStart)
+                .padding(start = 8.dp, bottom = 90.dp)
                 .size(32.dp),
             containerColor = Color.Black.copy(alpha = 0.4f),
             contentColor = Color.White,
