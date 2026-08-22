@@ -1,8 +1,11 @@
 # Pulse Music 🎵
 
-Pulse is a high-performance, resilient Android music streaming engine built on modern Android standards (Media3, Jetpack Compose). It features a "Final Form" JIT (Just-In-Time) resolution architecture that provides a seamless, premium listening experience across YouTube and local storage.
+Pulse is a high-performance, resilient Android music streaming engine built on modern Android standards (Media3, Jetpack Compose). It features a **"Final Form" JIT (Just-In-Time) resolution architecture** that provides a seamless, premium listening experience across YouTube and local storage.
 
-![Pulse UI Placeholder](https://via.placeholder.com/800x400?text=Pulse+Music+Interface)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/user-attachments/assets/8172960a-4933-4f9e-bc43-26464522964b" width="30%" alt="Now Playing Screen">
+  <img src="https://raw.githubusercontent.com/user-attachments/assets/7594967a-2514-4634-874d-96541622964b" width="30%" alt="Notification Bar">
+</p>
 
 ## 🚀 Architectural Highlights
 
