@@ -36,7 +36,6 @@ class SongApplication : Application() {
     lateinit var repository: SongRepository
         private set
 
-    // 🌐 Shared OkHttp client for both extraction and playback
     val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .followRedirects(true)
@@ -53,7 +52,6 @@ class SongApplication : Application() {
 
     @androidx.media3.common.util.UnstableApi
     private fun initPlayerCache() {
-        // Strict 300 MB limit using Least Recently Used (LRU) policy
         val cacheSize: Long = 300L * 1024 * 1024 
         val cacheEvictor = LeastRecentlyUsedCacheEvictor(cacheSize)
         val databaseProvider = StandaloneDatabaseProvider(this)
@@ -64,14 +62,13 @@ class SongApplication : Application() {
             databaseProvider
         )
         
-        // Polling approach to avoid listener API version conflicts
         CoroutineScope(Dispatchers.IO).launch {
             while (true) {
                 val keys = try { playerCache.keys } catch (e: Exception) { emptySet() }
                 if (_cachedKeys.value != keys) {
                     _cachedKeys.value = keys
                 }
-                delay(2000) // Poll every 2 seconds
+                delay(2000)
             }
         }
     }
@@ -94,25 +91,21 @@ class SongApplication : Application() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.d("SongApplication", "Starting engine initialization...")
-                
-                // Initialize binaries
                 YoutubeDL.getInstance().init(this@SongApplication)
                 FFmpeg.getInstance().init(this@SongApplication)
                 
-                // 2. Make Update Blockable & 5. Optimization (Once per session in onCreate)
-                // We await this call before setting _isReady to true
                 try {
                     Log.d("SongApplication", "Checking for yt-dlp binary updates...")
                     val updateResult = YoutubeDL.getInstance().updateYoutubeDL(this@SongApplication)
                     Log.d("SongApplication", "yt-dlp update status: $updateResult")
+                    com.example.song.util.PulseLogger.log("Engine updated: $updateResult")
                 } catch (e: Exception) {
-                    // 4. Error Resilience: Proceed with bundled version if update fails (e.g. no internet)
-                    Log.e("SongApplication", "Failed to update yt-dlp binary, using bundled version", e)
+                    Log.e("SongApplication", "Failed to update yt-dlp binary", e)
                 }
                 
-                // 1. Global Initialization State
                 _isReady.value = true
                 Log.d("SongApplication", "YoutubeDL and FFmpeg initialized successfully")
+                com.example.song.util.PulseLogger.log("Engine Ready")
             } catch (e: YoutubeDLException) {
                 Log.e("SongApplication", "Failed to initialize YoutubeDL", e)
             } catch (e: Exception) {

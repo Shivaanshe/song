@@ -97,7 +97,9 @@ fun MainApp(viewModel: SongViewModel) {
     val mainScreens = listOf("library", "favorites", "discover")
     val showBottomBar = currentDestination?.route in mainScreens
 
-    FluidMeshBackground {
+    val isOrbsEnabled by viewModel.isBackgroundOrbsEnabled.collectAsState()
+
+    FluidMeshBackground(showOrbs = isOrbsEnabled) {
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {

@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +49,8 @@ fun DebugOverlay(viewModel: SongViewModel) {
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val currentTask by viewModel.currentTask.collectAsState()
     val cachedKeys by viewModel.cachedKeys.collectAsState()
+
+    val isOrbsEnabled by viewModel.isBackgroundOrbsEnabled.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         SmallFloatingActionButton(
@@ -99,6 +102,24 @@ fun DebugOverlay(viewModel: SongViewModel) {
                                     DebugRowFixed("Live Task", currentTask ?: "Idle", Color(0xFF81C784))
                                     DebugRowFixed("Extracting", isExtracting.toString(), if(isExtracting) Color.Yellow else Color.White)
                                     DebugRowFixed("Resolving ID", resolvingId?.toString() ?: "None", if(resolvingId != null) Color.Cyan else Color.White)
+                                    
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Background Orbs", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                        Switch(
+                                            checked = isOrbsEnabled,
+                                            onCheckedChange = { viewModel.toggleBackgroundOrbs() },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = Color(0xFF81C784),
+                                                checkedTrackColor = Color(0xFF81C784).copy(alpha = 0.5f)
+                                            ),
+                                            modifier = Modifier.scale(0.7f)
+                                        )
+                                    }
+                                    
                                     currentSong?.let {
                                         DebugRowFixed("Active Song", it.title, Color(0xFFFF4081))
                                     }

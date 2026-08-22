@@ -34,6 +34,7 @@ import kotlin.math.sin
 @Composable
 fun FluidMeshBackground(
     modifier: Modifier = Modifier,
+    showOrbs: Boolean = true,
     content: @Composable BoxScope.() -> Unit
 ) {
     val context = LocalContext.current
@@ -51,7 +52,7 @@ fun FluidMeshBackground(
 
     // Master animation progress (0f to 1f over 8 seconds)
     // ⚡ Automatic Frame Clock Pausing: infiniteTransition natively suspends when composable is not visible.
-    val progressState = if (isPowerSaveMode) {
+    val progressState = if (isPowerSaveMode || !showOrbs) {
         remember { mutableStateOf(0f) }
     } else {
         infiniteTransition.animateFloat(
@@ -71,8 +72,8 @@ fun FluidMeshBackground(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                // 🔋 Optimization: Remove expensive blur filter in Power Save Mode
-                .then(if (isPowerSaveMode) Modifier else Modifier.blur(80.dp))
+                // 🔋 Optimization: Remove expensive blur filter in Power Save Mode or when orbs are hidden
+                .then(if (isPowerSaveMode || !showOrbs) Modifier else Modifier.blur(80.dp))
                 .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         ) {
             val width = size.width
@@ -89,69 +90,71 @@ fun FluidMeshBackground(
                 )
             )
 
-            // 2. Animated Orbs with Asynchronous Phase Delays
-            // Phase Offsets: Violet: 0s, Cobalt: -2.4s, Magenta: -5.1s, Coral: -3.7s
-            // (Relative to 8s loop: 0f, -0.3f, -0.6375f, -0.4625f)
-            
-            // Orb 1 (Violet): Top-left anchor, clockwise drift
-            drawOrb(
-                color = Color(0xFF8A2BE2),
-                progress = (progress + 0.000f) % 1f,
-                center = center,
-                radius = width * 0.6f,
-                movement = { p ->
-                    val angle = p * 2 * PI
-                    Offset(
-                        x = cos(angle).toFloat() * width * 0.15f - width * 0.2f,
-                        y = sin(angle).toFloat() * height * 0.15f - height * 0.2f
-                    )
-                }
-            )
+            if (showOrbs && !isPowerSaveMode) {
+                // 2. Animated Orbs with Asynchronous Phase Delays
+                // Phase Offsets: Violet: 0s, Cobalt: -2.4s, Magenta: -5.1s, Coral: -3.7s
+                // (Relative to 8s loop: 0f, -0.3f, -0.6375f, -0.4625f)
+                
+                // Orb 1 (Violet): Top-left anchor, clockwise drift
+                drawOrb(
+                    color = Color(0xFF8A2BE2),
+                    progress = (progress + 0.000f) % 1f,
+                    center = center,
+                    radius = width * 0.6f,
+                    movement = { p ->
+                        val angle = p * 2 * PI
+                        Offset(
+                            x = cos(angle).toFloat() * width * 0.15f - width * 0.2f,
+                            y = sin(angle).toFloat() * height * 0.15f - height * 0.2f
+                        )
+                    }
+                )
 
-            // Orb 2 (Cobalt): Top-right, counter-clockwise sweep
-            drawOrb(
-                color = Color(0xFF1E40AF),
-                progress = (progress + 0.700f) % 1f, // -2.4s phase
-                center = center,
-                radius = width * 0.7f,
-                movement = { p ->
-                    val angle = -p * 2 * PI
-                    Offset(
-                        x = cos(angle).toFloat() * width * 0.2f + width * 0.25f,
-                        y = sin(angle).toFloat() * height * 0.1f - height * 0.25f
-                    )
-                }
-            )
+                // Orb 2 (Cobalt): Top-right, counter-clockwise sweep
+                drawOrb(
+                    color = Color(0xFF1E40AF),
+                    progress = (progress + 0.700f) % 1f, // -2.4s phase
+                    center = center,
+                    radius = width * 0.7f,
+                    movement = { p ->
+                        val angle = -p * 2 * PI
+                        Offset(
+                            x = cos(angle).toFloat() * width * 0.2f + width * 0.25f,
+                            y = sin(angle).toFloat() * height * 0.1f - height * 0.25f
+                        )
+                    }
+                )
 
-            // Orb 3 (Magenta): Center-bottom, figure-8 pulse
-            drawOrb(
-                color = Color(0xFFC026D3),
-                progress = (progress + 0.3625f) % 1f, // -5.1s phase
-                center = center,
-                radius = width * 0.55f,
-                movement = { p ->
-                    val angle = p * 2 * PI
-                    Offset(
-                        x = sin(angle).toFloat() * width * 0.25f,
-                        y = sin(angle * 2).toFloat() * height * 0.15f + height * 0.25f
-                    )
-                }
-            )
+                // Orb 3 (Magenta): Center-bottom, figure-8 pulse
+                drawOrb(
+                    color = Color(0xFFC026D3),
+                    progress = (progress + 0.3625f) % 1f, // -5.1s phase
+                    center = center,
+                    radius = width * 0.55f,
+                    movement = { p ->
+                        val angle = p * 2 * PI
+                        Offset(
+                            x = sin(angle).toFloat() * width * 0.25f,
+                            y = sin(angle * 2).toFloat() * height * 0.15f + height * 0.25f
+                        )
+                    }
+                )
 
-            // Orb 4 (Coral): Bottom-right, inward arc
-            drawOrb(
-                color = Color(0xFFF43F5E),
-                progress = (progress + 0.5375f) % 1f, // -3.7s phase
-                center = center,
-                radius = width * 0.5f,
-                movement = { p ->
-                    val angle = p * 2 * PI
-                    Offset(
-                        x = cos(angle).toFloat() * width * 0.15f + width * 0.3f,
-                        y = cos(angle).toFloat() * height * 0.15f + height * 0.3f
-                    )
-                }
-            )
+                // Orb 4 (Coral): Bottom-right, inward arc
+                drawOrb(
+                    color = Color(0xFFF43F5E),
+                    progress = (progress + 0.5375f) % 1f, // -3.7s phase
+                    center = center,
+                    radius = width * 0.5f,
+                    movement = { p ->
+                        val angle = p * 2 * PI
+                        Offset(
+                            x = cos(angle).toFloat() * width * 0.15f + width * 0.3f,
+                            y = cos(angle).toFloat() * height * 0.15f + height * 0.3f
+                        )
+                    }
+                )
+            }
         }
 
         // Overlay existing UI content

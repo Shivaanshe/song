@@ -67,6 +67,7 @@ object YoutubeStreamHandler {
                                   .replace("official audio", "", ignoreCase = true)
                                   .trim()
             
+            PulseLogger.log("Searching YouTube: $cleanQuery")
             val finalQuery = "ytsearch1:$cleanQuery"
             val request = YoutubeDLRequest(finalQuery).apply {
                 addOption("--get-id")

@@ -28,7 +28,6 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.File
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
@@ -99,6 +98,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     val currentTask: StateFlow<String?> = PulseLogger.currentTask
     val cachedKeys: StateFlow<Set<String>> = com.example.song.SongApplication.getInstance().cachedKeys
 
+    // 🛡️ Debug Settings
+    private val _isBackgroundOrbsEnabled = MutableStateFlow(true)
+    val isBackgroundOrbsEnabled: StateFlow<Boolean> = _isBackgroundOrbsEnabled.asStateFlow()
+
     private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
 
@@ -130,7 +133,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.allSongs.collect { songs ->
                 _allSongs.value = songs
-                // Update current playing song from the latest list to reflect changes (like favorite status)
                 val currentId = _currentPlayingSong.value?.id 
                     ?: mediaController?.currentMediaItem?.mediaId?.toIntOrNull()
                 
@@ -153,11 +155,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        /* viewModelScope.launch {
-            repository.scanAndRestoreSongs()
-        } */
-        
         initMediaController(application)
+    }
+
+    fun toggleBackgroundOrbs() {
+        _isBackgroundOrbsEnabled.value = !_isBackgroundOrbsEnabled.value
+        PulseLogger.log("Background Orbs: ${_isBackgroundOrbsEnabled.value}")
     }
 
     fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
@@ -168,6 +171,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isExtracting.value = true
             _extractionError.value = null
+            PulseLogger.log("Searching URL: $url")
             try {
                 val items = if (url.contains("spotify.com")) {
                     SpotifyResolver.resolve(url, repository)
@@ -176,24 +180,23 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 Log.d("SongViewModel", "Extraction results for $url: ${items.size} items")
+                PulseLogger.log("Found ${items.size} items for extraction.")
                 
                 if (items.isEmpty()) {
                     _extractionError.value = if (url.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
                     return@launch
                 }
 
-                // Identify collection
                 val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
                 if (items.size == 1 && !isCollection) {
-                    // Single track, add immediately
                     repository.insertStreamingItems(items)
                 } else {
-                    // Playlist, multiple items, or collection, show choice
                     _pendingStreamingItems.value = items
                 }
             } catch (e: Exception) {
                 val errorMsg = e.localizedMessage ?: ""
+                PulseLogger.log("Extraction error: $errorMsg", isError = true)
                 _extractionError.value = when {
                     errorMsg.contains("429") -> "YouTube is rate-limiting requests. Please try again in a few minutes."
                     errorMsg.contains("confirm you're not a bot") -> "Bot detection triggered. Try a different link or wait."
@@ -214,7 +217,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             if (asCollection) {
                 repository.insertStreamingItems(items)
             } else {
-                // Discard playlist container and add videos as top-level
                 val filteredItems = items.filter { !it.isPlaylist }.map { 
                     it.copy(parentPlaylistUrl = null) 
                 }
@@ -255,19 +257,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         mediaItem?.let { item ->
                             val songId = item.mediaId.toIntOrNull()
-                            // Update current song from allSongs or reconstruct from metadata
                             _currentPlayingSong.value = _allSongs.value.find { it.id == songId } ?: Song(
                                 id = songId ?: 0,
                                 title = item.mediaMetadata.title?.toString() ?: "Unknown",
                                 artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
                                 audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
-                                imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url") // 🛡️ Task: Extract from extras
+                                imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url")
                             )
+                            PulseLogger.log("Track transition: ${_currentPlayingSong.value?.title}")
                         }
                     }
 
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
+                        PulseLogger.log("Playback state: ${if (playing) "Playing" else "Paused"}")
                     }
 
                     override fun onPositionDiscontinuity(
@@ -292,12 +295,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         val uriString = currentItem?.localConfiguration?.uri?.toString() ?: ""
                         
                         if (uriString.contains("pulse_placeholder:")) {
-                            Log.d("PulseDebug", "ViewModel intercepted placeholder error. Masking UI as Buffering.")
-                            // Do not set _playbackError, effectively masking it from the user
+                            PulseLogger.log("Masked placeholder error. Resolving JIT...")
                             return
                         }
 
                         Log.e("SongViewModel", "Playback error: ${error.message}", error)
+                        PulseLogger.log("Engine error: ${error.localizedMessage}", isError = true)
                         _playbackError.value = "Playback Error: ${error.localizedMessage}"
                         _isPlaying.value = false
                     }
@@ -306,7 +309,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         _repeatMode.value = repeatMode
                     }
                 })
-                // Initial state sync
                 _repeatMode.value = repeatMode
                 _isPlaying.value = isPlaying
                 _currentPlayingSong.value = currentMediaItem?.let { item ->
@@ -316,7 +318,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         title = item.mediaMetadata.title?.toString() ?: "Unknown",
                         artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
                         audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
-                        imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url") // 🛡️ Task: Extract from extras
+                        imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url")
                     )
                 }
             }
@@ -360,8 +362,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val updatedSong = song.copy(isFavorite = isFavorite)
             repository.updateSong(updatedSong)
-            // Explicitly update currentPlayingSong if it's the one being modified
-            // to ensure immediate UI feedback
             if (_currentPlayingSong.value?.id == song.id) {
                 _currentPlayingSong.value = updatedSong
             }
@@ -391,8 +391,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val isAdding = !currentSelected.contains(songId)
         
         _selectionRange.value = SelectionRange(songId, currentSelected, isAdding)
-        
-        // Initial state update
         updateRangeSelection(songId, allItems, isStreaming)
     }
 
@@ -535,8 +533,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         if (queue.isEmpty()) return
         
         _currentQueue.value = queue
+        PulseLogger.log("Playing local song: ${song.title}")
         
-        // 📋 Task: Move Queue Management to Service (ID-Only to avoid TransactionTooLargeException)
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
         val ids = ArrayList(queue.map { it.id })
         
@@ -556,8 +554,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             putString("custom_artwork_url", thumbnailUrl) 
         }
         
-        // --- Hard Validation for ExoPlayer Safety ---
-        // We set the URI to a safe local asset link if not resolved.
         val safeUriString = if (!directUrl.isNullOrEmpty() && directUrl.startsWith("http")) {
             directUrl
         } else {
@@ -571,7 +567,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 MediaMetadata.Builder()
                     .setTitle(title)
                     .setArtist(artist ?: "YouTube")
-                    // 🛡️ Task: Removed ArtworkUri to prevent SocketTimeoutException in MediaSession
                     .setExtras(bundle)
                     .build()
             )
@@ -582,6 +577,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         val filteredQueue = queue.filter { !it.isPlaylist }
         val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
         val ids = ArrayList(filteredQueue.map { it.id })
+        PulseLogger.log("Playing streaming item: ${item.title}")
         
         _currentQueue.value = filteredQueue.map {
             Song(
@@ -609,8 +605,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             if (controller.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT)) {
                 controller.seekToNext()
             } else {
-                // 🛡️ Skip-Override: Fallback for Error/Disabled states
                 Log.d("PulseDebug", "seekToNext rejected. Triggering skip-override.")
+                PulseLogger.log("Manual skip: Next")
                 controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
             }
         }
@@ -621,8 +617,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             if (controller.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS)) {
                 controller.seekToPrevious()
             } else {
-                // 🛡️ Skip-Override: Fallback for Error/Disabled states
                 Log.d("PulseDebug", "seekToPrevious rejected. Triggering skip-override.")
+                PulseLogger.log("Manual skip: Previous")
                 controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
             }
         }
@@ -631,12 +627,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleRepeatMode() {
         mediaController?.let {
             val nextMode = when (it.repeatMode) {
-                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL // Repeat All (Green)
-                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE // Repeat One (Green with 1)
-                else -> Player.REPEAT_MODE_OFF // Repeat Off (Gray)
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
             }
             it.repeatMode = nextMode
             _repeatMode.value = nextMode
+            PulseLogger.log("Repeat mode: $nextMode")
         }
     }
 
@@ -647,8 +644,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun fetchDownloadMetadata(url: String) {
         viewModelScope.launch {
             _isExtracting.value = true
+            PulseLogger.log("Searching download: $url")
             try {
-                // Sanitize YouTube URLs
                 val sanitizedUrl = if (url.contains("youtube.com") && url.contains("list=")) {
                     val listId = url.substringAfter("list=").substringBefore("&")
                     "https://www.youtube.com/playlist?list=$listId"
@@ -669,13 +666,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Identify collection
                 val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
                 if (items.size == 1 && !isCollection) {
-                    // Single track, download immediately
                     val item = items[0]
-                    
                     downloadFromYoutube(
                         url = item.youtubeUrl,
                         overrideTitle = item.title,
@@ -683,7 +677,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         overrideImageUrl = item.thumbnailUrl
                     )
                 } else {
-                    // Playlist, multiple items, or collection, show choice
                     _pendingDownloadItems.value = items
                 }
             } catch (e: Exception) {
@@ -696,7 +689,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startBatchDownload(asPlaylist: Boolean) {
         viewModelScope.launch {
-            // Self-Heal Improvement: Wait for engine readiness
             val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
             if (!isReadyFlow.value) {
                 _downloadState.value = DownloadState.Downloading(0f)
@@ -724,13 +716,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _pendingDownloadItems.value = emptyList()
-            
             _downloadState.value = DownloadState.Downloading(0f, 1, items.size)
             
             items.forEachIndexed { index, item ->
                 try {
                     _downloadState.value = DownloadState.Downloading(0f, index + 1, items.size)
-                    
                     repository.downloadYouTubeAudio(
                         url = item.youtubeUrl, 
                         playlistId = playlistId,
@@ -762,12 +752,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         overrideImageUrl: String? = null
     ) {
         viewModelScope.launch {
-            // Self-Heal Improvement: Wait for engine readiness instead of failing immediately
             val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
             if (!isReadyFlow.value) {
-                _downloadState.value = DownloadState.Downloading(0f) // Show preparing state
+                _downloadState.value = DownloadState.Downloading(0f)
                 try {
-                    withTimeout(15000) { // Wait up to 15 seconds
+                    withTimeout(15000) {
                         isReadyFlow.first { it }
                     }
                 } catch (e: Exception) {
@@ -779,6 +768,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
+                PulseLogger.log("Starting download: $overrideTitle")
                 repository.downloadYouTubeAudio(
                     url = url,
                     overrideTitle = overrideTitle,
@@ -788,12 +778,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadState.value = DownloadState.Downloading(progress)
                 }
                 _downloadState.value = DownloadState.Success
+                PulseLogger.log("Download finished: $overrideTitle")
                 delay(3000)
                 _downloadState.value = DownloadState.Idle
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException || e.message == "Download cancelled") {
                     _downloadState.value = DownloadState.Idle
                 } else {
+                    PulseLogger.log("Download failed: ${e.localizedMessage}", isError = true)
                     _downloadState.value = DownloadState.Error(e.message ?: "Unknown error")
                     delay(3000)
                     _downloadState.value = DownloadState.Idle
@@ -809,34 +801,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetDownloadState() {
         _downloadState.value = DownloadState.Idle
-    }
-
-    private fun Song.toMediaItem(): MediaItem {
-        val query = "ytsearch1:$title $artist"
-        val safeUri = if (audioUri.contains("pulse.music") || audioUri.startsWith("yt")) {
-            Uri.parse("pulse_placeholder:$query")
-        } else if (audioUri.startsWith("content://") || audioUri.startsWith("http")) {
-            Uri.parse(audioUri)
-        } else {
-            Uri.fromFile(File(audioUri))
-        }
-
-        return MediaItem.Builder()
-            .setMediaId(id.toString())
-            .setUri(safeUri)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(title)
-                    .setArtist(artist)
-                    .setExtras(Bundle().apply {
-                        putString("youtube_url", audioUri)
-                        putString("search_query", query)
-                        putString("custom_artwork_url", imageUrl)
-                        putString("artwork_url", imageUrl)
-                    })
-                    .build()
-            )
-            .build()
     }
 
     fun togglePlayPause() {
