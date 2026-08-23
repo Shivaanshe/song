@@ -368,11 +368,25 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateFavorite(song: Song, isFavorite: Boolean) {
         viewModelScope.launch {
-            val updatedSong = song.copy(isFavorite = isFavorite)
-            repository.updateSong(updatedSong)
-            if (_currentPlayingSong.value?.id == song.id) {
-                _currentPlayingSong.value = updatedSong
+            if (song.id >= 1_000_000) {
+                // Streaming Item Favorite
+                val actualId = song.id - 1_000_000
+                repository.updateStreamingItemFavorite(actualId, isFavorite)
+            } else {
+                // Local Song Favorite
+                val updatedSong = song.copy(isFavorite = isFavorite)
+                repository.updateSong(updatedSong)
             }
+            
+            if (_currentPlayingSong.value?.id == song.id) {
+                _currentPlayingSong.value = song.copy(isFavorite = isFavorite)
+            }
+        }
+    }
+
+    fun toggleStreamingFavorite(item: StreamingItem) {
+        viewModelScope.launch {
+            repository.updateStreamingItemFavorite(item.id, !item.isFavorite)
         }
     }
 
@@ -584,12 +598,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
         val filteredQueue = queue.filter { !it.isPlaylist }
         val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-        val ids = ArrayList(filteredQueue.map { it.id })
+        val ids = ArrayList(filteredQueue.map { 1_000_000 + it.id })
         PulseLogger.log("Playing streaming item: ${item.title}")
         
         _currentQueue.value = filteredQueue.map {
             Song(
-                id = it.id,
+                id = 1_000_000 + it.id,
                 title = it.title,
                 artist = it.artist ?: "Unknown Artist",
                 audioUri = it.youtubeUrl,

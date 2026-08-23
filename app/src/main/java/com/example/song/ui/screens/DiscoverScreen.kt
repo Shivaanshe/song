@@ -273,7 +273,7 @@ fun DiscoverScreen(
                                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                                         contentPadding = PaddingValues(horizontal = 24.dp)
                                     ) {
-                                        items(playlists, key = { it.id }) { playlist ->
+                                    items(playlists, key = { it.id }) { playlist ->
                                             StreamingPlaylistCard(
                                                 item = playlist,
                                                 isSelected = selectedStreamingIds.contains(playlist.id),
@@ -325,6 +325,9 @@ fun DiscoverScreen(
                                                 onSongClick()
                                             }
                                         }
+                                    },
+                                    onFavoriteToggle = {
+                                        viewModel.toggleStreamingFavorite(item)
                                     },
                                     onDelete = {
                                         viewModel.deleteStreamingItem(item)
@@ -398,6 +401,9 @@ fun DiscoverScreen(
                                             onSongClick()
                                         }
                                     }
+                                },
+                                onFavoriteToggle = {
+                                    viewModel.toggleStreamingFavorite(item)
                                 },
                                 onDelete = {
                                     viewModel.deleteStreamingItem(item)
@@ -827,6 +833,7 @@ fun StreamingItemCard(
     isResolving: Boolean = false,
     isPlaying: Boolean = false,
     onClick: () -> Unit,
+    onFavoriteToggle: () -> Unit,
     onDelete: () -> Unit,
     isSelected: Boolean = false,
     onLongClick: () -> Unit = {},
@@ -971,6 +978,20 @@ fun StreamingItemCard(
                         color = Color(0xFFE91E63)
                     )
                 } else {
+                    IconButton(
+                        onClick = onFavoriteToggle,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (item.isFavorite) Color.Red else Color(0xFF424242),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
                     IconButton(
                         onClick = onClick,
                         modifier = Modifier.background(Color.White.copy(alpha = 0.5f), CircleShape).size(32.dp),

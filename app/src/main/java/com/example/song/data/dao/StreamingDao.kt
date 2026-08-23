@@ -12,6 +12,9 @@ interface StreamingDao {
     @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl ORDER BY id ASC")
     fun getItemsForPlaylist(playlistUrl: String): Flow<List<StreamingItem>>
 
+    @Query("SELECT * FROM streaming_items WHERE isFavorite = 1")
+    fun getFavoriteItems(): Flow<List<StreamingItem>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(item: StreamingItem)
 
@@ -32,6 +35,9 @@ interface StreamingDao {
     
     @Query("UPDATE streaming_items SET title = :newTitle WHERE id = :itemId")
     suspend fun updateTitle(itemId: Int, newTitle: String)
+
+    @Query("UPDATE streaming_items SET isFavorite = :isFavorite WHERE id = :itemId")
+    suspend fun updateFavorite(itemId: Int, isFavorite: Boolean)
     
     @Query("DELETE FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl")
     suspend fun deletePlaylistItems(playlistUrl: String)

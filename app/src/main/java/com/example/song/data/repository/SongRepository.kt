@@ -14,6 +14,8 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.mapper.VideoInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -54,7 +56,25 @@ class SongRepository(
 
     val allSongs: Flow<List<Song>> = songDao.getAllSongs()
     val allPlaylists: Flow<List<Playlist>> = playlistDao.getAllPlaylists()
-    val favoriteSongs: Flow<List<Song>> = songDao.getFavoriteSongs()
+    
+    val favoriteSongs: Flow<List<Song>> = combine(
+        songDao.getFavoriteSongs(),
+        streamingDao.getFavoriteItems()
+    ) { local, streaming ->
+        val mappedStreaming = streaming.map { item ->
+            Song(
+                id = 1_000_000 + item.id, // Offset ID for streaming items
+                title = item.title,
+                artist = item.artist ?: "YouTube",
+                audioUri = item.youtubeUrl,
+                imageUrl = item.thumbnailUrl,
+                isFavorite = item.isFavorite,
+                duration = item.duration
+            )
+        }
+        local + mappedStreaming
+    }
+
     val topLevelStreamingItems: Flow<List<StreamingItem>> = streamingDao.getAllTopLevelItems()
     val allSongIdsInPlaylists: Flow<List<Int>> = playlistDao.getAllSongIdsInPlaylists()
 
@@ -107,6 +127,10 @@ class SongRepository(
 
     suspend fun updateStreamingItemTitle(itemId: Int, newTitle: String) {
         streamingDao.updateTitle(itemId, newTitle)
+    }
+
+    suspend fun updateStreamingItemFavorite(itemId: Int, isFavorite: Boolean) {
+        streamingDao.updateFavorite(itemId, isFavorite)
     }
 
     suspend fun insertSong(song: Song): Int {

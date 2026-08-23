@@ -13,5 +13,6 @@ data class StreamingItem(
     val thumbnailUrl: String?,
     val isPlaylist: Boolean = false,
     val parentPlaylistUrl: String? = null,
-    val duration: Long = 0L
+    val duration: Long = 0L,
+    val isFavorite: Boolean = false
 )

@@ -139,6 +139,9 @@ class MusicService : MediaSessionService() {
         
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // 🛡️ Avoid feedback loop: Ignore transitions triggered by metadata/playlist updates
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
+
                 // 🛡️ Cancel stale resolution jobs
                 activeJobs.forEach { (key, job) ->
                     if (mediaItem?.localConfiguration?.uri?.getQueryParameter("query") != key) {
@@ -212,11 +215,11 @@ class MusicService : MediaSessionService() {
                 if (info != null) {
                     ResolvedData(info.url, info.headers, art)
                 } else {
-                    com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
                     null
                 }
             }
         } catch (_: Exception) { null } finally {
+            com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
             activeJobs.remove(query)
             job.cancel()
         }
@@ -251,6 +254,10 @@ class MusicService : MediaSessionService() {
     private fun updateMetadataInQueue(index: Int, query: String, artworkBytes: ByteArray?) {
         if (index < 0 || index >= player.mediaItemCount) return
         val item = player.getMediaItemAt(index)
+        
+        // 🛡️ Optimization: If item already has artwork, skip update to prevent transition loop
+        if (item.mediaMetadata.artworkData != null) return
+
         if (item.localConfiguration?.uri?.getQueryParameter("query") == query) {
             val updatedMetadata = item.mediaMetadata.buildUpon()
                 .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
@@ -288,21 +295,32 @@ class MusicService : MediaSessionService() {
                 .build()
         }
 
+        override fun onPlaybackResumption(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+        }
+
         override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
             if (customCommand.customAction == "PLAY_QUEUE") {
                 val index = args.getInt("index", 0)
                 val ids = args.getIntegerArrayList("ids") ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
-                val isStreaming = args.getBoolean("isStreaming", false)
                 
                 serviceScope.launch {
                     val repository = SongApplication.getInstance().repository
-                    val unsortedSongs = if (isStreaming) {
-                        repository.getStreamingItemsByIdsSync(ids).map { it.toSong() }
-                    } else {
-                        repository.getSongsByIdsSync(ids)
+                    
+                    val streamingIds = ids.filter { it >= 1_000_000 }.map { it - 1_000_000 }
+                    val localIds = ids.filter { it < 1_000_000 }
+                    
+                    val streamingItems = if (streamingIds.isNotEmpty()) repository.getStreamingItemsByIdsSync(streamingIds) else emptyList()
+                    val localSongs = if (localIds.isNotEmpty()) repository.getSongsByIdsSync(localIds) else emptyList()
+                    
+                    val allItemsMap = mutableMapOf<Int, Song>()
+                    localSongs.forEach { allItemsMap[it.id] = it }
+                    streamingItems.forEach { item ->
+                        val song = item.toSong().copy(id = 1_000_000 + item.id)
+                        allItemsMap[1_000_000 + item.id] = song
                     }
                     
-                    val songs = ids.mapNotNull { id -> unsortedSongs.find { it.id == id } }
+                    val songs = ids.mapNotNull { allItemsMap[it] }
                     
                     if (songs.isNotEmpty()) {
                         PulseLogger.log("Queue mapping: ${songs.size} items JIT-Ready")
