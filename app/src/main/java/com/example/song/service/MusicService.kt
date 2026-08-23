@@ -35,9 +35,11 @@ import com.example.song.util.YoutubeStreamHandler
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 @UnstableApi
 class MusicService : MediaSessionService() {
@@ -46,7 +48,13 @@ class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
+    private lateinit var httpDataSourceFactory: OkHttpDataSource.Factory
     private var currentQueue: List<Song> = emptyList()
+
+    private val resolvedCache = ConcurrentHashMap<String, ResolvedData>()
+    private val activeJobs = ConcurrentHashMap<String, Job>()
+
+    data class ResolvedData(val url: String, val headers: Map<String, String>, val artwork: ByteArray?)
 
     companion object {
         private const val CHANNEL_ID = "pulse_music_channel"
@@ -71,9 +79,8 @@ class MusicService : MediaSessionService() {
         val app = SongApplication.getInstance()
         val cache = app.playerCache
         
-        // 🛡️ THE FIX: Use DefaultDataSource.Factory to support file://, asset://, and http://
-        val httpFactory = OkHttpDataSource.Factory(app.okHttpClient)
-        val baseFactory = DefaultDataSource.Factory(this, httpFactory)
+        httpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
+        val baseFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
 
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
@@ -87,47 +94,36 @@ class MusicService : MediaSessionService() {
                     val uriStr = dataSpec.uri.toString()
                     
                     if (uriStr.contains("pulse.music/resolve")) {
+                        val mediaId = dataSpec.uri.pathSegments.lastOrNull() ?: "unknown"
                         val query = dataSpec.uri.getQueryParameter("query") ?: return dataSpec
                         val artworkUrl = dataSpec.uri.getQueryParameter("artwork_url") ?: ""
                         
+                        resolvedCache[query]?.let { cached ->
+                            PulseLogger.log("JIT Cache Hit: Instant skip enabled.")
+                            return dataSpec.buildUpon()
+                                .setUri(Uri.parse(cached.url))
+                                .setHttpRequestHeaders(cached.headers)
+                                .setKey(mediaId)
+                                .build()
+                        }
+
                         PulseLogger.log("JIT Resolution started for: $query")
                         
                         return runBlocking(Dispatchers.IO) { 
-                            val isLocalFile = query.startsWith("/") || query.startsWith("file://") || File(query).exists()
-                            
-                            if (isLocalFile) {
-                                PulseLogger.log("Local path detected. Bypassing extraction.")
-                                val artworkBytes = fetchImageAsByteArray(artworkUrl)
-                                
+                            val resolved = performResolution(query, artworkUrl, isPriority = true)
+                            if (resolved != null) {
+                                resolvedCache[query] = resolved
                                 withContext(Dispatchers.Main) {
-                                    upgradeMediaItem(query, artworkBytes, query)
-                                }
-                                
-                                return@runBlocking dataSpec.buildUpon()
-                                    .setUri(Uri.fromFile(File(query)))
-                                    .build()
-                            }
-
-                            val processId = UUID.randomUUID().toString()
-                            val streamDeferred = async { YoutubeStreamHandler.getStreamInfo(query, processId) }
-                            val artworkDeferred = async { fetchImageAsByteArray(artworkUrl) }
-                            
-                            val streamInfo = withTimeoutOrNull(35000L) { streamDeferred.await() }
-                            val artworkBytes = artworkDeferred.await()
-
-                            if (streamInfo != null) {
-                                PulseLogger.log("JIT Resolution SUCCESS for: $query")
-                                withContext(Dispatchers.Main) {
-                                    upgradeMediaItem(query, artworkBytes, streamInfo.url)
+                                    updateActiveMetadata(query, resolved.artwork)
                                 }
 
                                 dataSpec.buildUpon()
-                                    .setUri(Uri.parse(streamInfo.url))
-                                    .setHttpRequestHeaders(streamInfo.headers)
+                                    .setUri(Uri.parse(resolved.url))
+                                    .setHttpRequestHeaders(resolved.headers)
+                                    .setKey(mediaId)
                                     .build()
                             } else {
                                 PulseLogger.log("JIT Resolution FAILED for: $query", isError = true)
-                                com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
                                 dataSpec
                             }
                         }
@@ -142,6 +138,26 @@ class MusicService : MediaSessionService() {
             .build()
         
         player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // 🛡️ Cancel stale resolution jobs
+                activeJobs.forEach { (key, job) ->
+                    if (mediaItem?.localConfiguration?.uri?.getQueryParameter("query") != key) {
+                        job.cancel()
+                        activeJobs.remove(key)
+                    }
+                }
+
+                if (mediaItem != null) {
+                    val query = mediaItem.localConfiguration?.uri?.getQueryParameter("query")
+                    query?.let { q ->
+                        resolvedCache[q]?.let { cached ->
+                            serviceScope.launch { updateActiveMetadata(q, cached.artwork) }
+                        }
+                    }
+                }
+                preResolveNextItems()
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     if (player.currentPosition > 1000) player.seekToNext()
@@ -156,8 +172,8 @@ class MusicService : MediaSessionService() {
                 PulseLogger.log("Player State: $stateName")
             }
             
-            override fun onIsPlayingChanged(playing: Boolean) {
-                PulseLogger.log("Playback: ${if(playing) "Playing" else "Paused"}")
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                PulseLogger.log("Playback: ${if(isPlaying) "Playing" else "Paused"}")
             }
         })
 
@@ -171,30 +187,89 @@ class MusicService : MediaSessionService() {
             .build()
     }
 
-    private fun upgradeMediaItem(query: String, artworkBytes: ByteArray?, realUrl: String) {
-        val index = player.currentMediaItemIndex
-        if (index >= 0 && index < player.mediaItemCount) {
-            val currentItem = player.getMediaItemAt(index)
-            val itemQuery = currentItem.localConfiguration?.uri?.getQueryParameter("query")
+    private suspend fun performResolution(query: String, artworkUrl: String, isPriority: Boolean): ResolvedData? = withContext(Dispatchers.IO) {
+        val processId = UUID.randomUUID().toString()
+        val isLocalFile = query.startsWith("/") || query.startsWith("file://") || File(query).exists()
+        
+        if (isLocalFile) {
+            val artworkBytes = fetchImageAsByteArray(artworkUrl)
+            return@withContext ResolvedData(Uri.fromFile(File(query)).toString(), emptyMap(), artworkBytes)
+        }
+
+        val job = Job()
+        activeJobs[query] = job
+        
+        try {
+            YoutubeStreamHandler.ytDlMutex.withLock {
+                if (!isPriority && !job.isActive) return@withLock null
+                
+                val streamDeferred = async { YoutubeStreamHandler.getStreamInfo(query, processId) }
+                val artworkDeferred = async { fetchImageAsByteArray(artworkUrl) }
+                
+                val info = withTimeoutOrNull(35000L) { streamDeferred.await() }
+                val art = artworkDeferred.await()
+                
+                if (info != null) {
+                    ResolvedData(info.url, info.headers, art)
+                } else {
+                    com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
+                    null
+                }
+            }
+        } catch (_: Exception) { null } finally {
+            activeJobs.remove(query)
+            job.cancel()
+        }
+    }
+
+    private fun preResolveNextItems() {
+        serviceScope.launch(Dispatchers.IO) {
+            val currentIndex = withContext(Dispatchers.Main) { player.currentMediaItemIndex }
+            val count = withContext(Dispatchers.Main) { player.mediaItemCount }
             
-            if (itemQuery == query) {
-                val realMetadata = currentItem.mediaMetadata.buildUpon()
-                    .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                    .build()
-                
-                val uri = if (realUrl.startsWith("/")) Uri.fromFile(File(realUrl)) else Uri.parse(realUrl)
-                
-                val realMediaItem = MediaItem.Builder()
-                    .setMediaId(currentItem.mediaId)
-                    .setUri(uri)
-                    .setCustomCacheKey(currentItem.mediaId)
-                    .setMediaMetadata(realMetadata)
-                    .build()
-                
-                player.replaceMediaItem(index, realMediaItem)
-                PulseLogger.log("MediaItem Upgraded (Local=$realUrl)")
+            val indices = listOf(currentIndex + 1, currentIndex + 2, currentIndex - 1)
+            for (i in indices) {
+                if (i in 0 until count) {
+                    val item = withContext(Dispatchers.Main) { player.getMediaItemAt(i) }
+                    val query = item.localConfiguration?.uri?.getQueryParameter("query")
+                    val artUrl = item.localConfiguration?.uri?.getQueryParameter("artwork_url")
+                    
+                    if (query != null && !resolvedCache.containsKey(query)) {
+                        val resolved = performResolution(query, artUrl ?: "", isPriority = false)
+                        if (resolved != null) {
+                            resolvedCache[query] = resolved
+                            withContext(Dispatchers.Main) {
+                                updateMetadataInQueue(i, query, resolved.artwork)
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private fun updateMetadataInQueue(index: Int, query: String, artworkBytes: ByteArray?) {
+        if (index < 0 || index >= player.mediaItemCount) return
+        val item = player.getMediaItemAt(index)
+        if (item.localConfiguration?.uri?.getQueryParameter("query") == query) {
+            val updatedMetadata = item.mediaMetadata.buildUpon()
+                .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .build()
+            val updatedItem = item.buildUpon().setMediaMetadata(updatedMetadata).build()
+            
+            if (index == player.currentMediaItemIndex) {
+                val pos = player.currentPosition
+                player.replaceMediaItem(index, updatedItem)
+                player.seekTo(index, pos)
+            } else {
+                player.replaceMediaItem(index, updatedItem)
+            }
+        }
+    }
+
+    private fun updateActiveMetadata(query: String, artworkBytes: ByteArray?) {
+        updateMetadataInQueue(player.currentMediaItemIndex, query, artworkBytes)
+        mediaSession?.setCustomLayout(emptyList()) 
     }
 
     private inner class MediaSessionCallback : MediaSession.Callback {
@@ -227,15 +302,17 @@ class MusicService : MediaSessionService() {
                         repository.getSongsByIdsSync(ids)
                     }
                     
-                    // 🛡️ Critical Fix: Manually sort the songs to match the order of 'ids' from the UI
                     val songs = ids.mapNotNull { id -> unsortedSongs.find { it.id == id } }
                     
                     if (songs.isNotEmpty()) {
                         PulseLogger.log("Queue mapping: ${songs.size} items JIT-Ready")
-                        val dummyMediaItems = songs.map { song ->
-                            val encodedQuery = Uri.encode(song.audioUri)
-                            val encodedArt = Uri.encode(song.imageUrl ?: "")
-                            val dummyUri = Uri.parse("https://pulse.music/resolve/${song.id}?query=$encodedQuery&artwork_url=$encodedArt")
+                        val mediaItems = songs.map { song ->
+                            val isLocal = song.audioUri.startsWith("/") || song.audioUri.startsWith("file://")
+                            val uri = if (isLocal) Uri.fromFile(File(song.audioUri)) else {
+                                val encodedQuery = Uri.encode(song.audioUri)
+                                val encodedArt = Uri.encode(song.imageUrl ?: "")
+                                Uri.parse("https://pulse.music/resolve/${song.id}?query=$encodedQuery&artwork_url=$encodedArt")
+                            }
 
                             val metadata = MediaMetadata.Builder()
                                 .setTitle(song.title)
@@ -248,15 +325,15 @@ class MusicService : MediaSessionService() {
                             
                             MediaItem.Builder()
                                 .setMediaId(song.id.toString())
-                                .setUri(dummyUri)
-                                .setCustomCacheKey(song.id.toString())
+                                .setUri(uri)
+                                .setCustomCacheKey(song.id.toString()) 
                                 .setMediaMetadata(metadata)
                                 .build()
                         }
                         
                         currentQueue = songs
                         withContext(Dispatchers.Main) {
-                            player.setMediaItems(dummyMediaItems, index, 0L)
+                            player.setMediaItems(mediaItems, index, 0L)
                             player.prepare()
                             player.play()
                         }
@@ -273,10 +350,7 @@ class MusicService : MediaSessionService() {
         return try {
             val app = SongApplication.getInstance()
             val loader = ImageLoader(app)
-            val request = ImageRequest.Builder(app)
-                .data(url)
-                .allowHardware(false) 
-                .build()
+            val request = ImageRequest.Builder(app).data(url).allowHardware(false).build()
             val result = loader.execute(request)
             if (result is SuccessResult) {
                 val bitmap = (result.drawable as? BitmapDrawable)?.bitmap

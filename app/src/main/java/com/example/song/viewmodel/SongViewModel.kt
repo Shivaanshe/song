@@ -264,6 +264,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                                 audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
                                 imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url")
                             )
+                            _duration.value = duration.coerceAtLeast(0L)
                             PulseLogger.log("Track transition: ${_currentPlayingSong.value?.title}")
                         }
                     }
@@ -285,7 +286,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_READY) {
-                            _duration.value = duration
+                            mediaController?.let {
+                                _duration.value = it.duration.coerceAtLeast(0L)
+                                _currentPosition.value = it.currentPosition
+                            }
                             _playbackError.value = null
                         }
                     }
@@ -332,6 +336,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 if (!isUserSeeking) {
                     mediaController?.let {
                         _currentPosition.value = it.currentPosition
+                        if (_duration.value <= 0) {
+                             val dur = it.duration
+                             if (dur > 0) _duration.value = dur
+                        }
                     }
                 }
                 delay(500)
