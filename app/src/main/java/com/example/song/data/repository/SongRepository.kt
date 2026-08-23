@@ -193,6 +193,10 @@ class SongRepository(
         songDao.getFirstSongSync()
     }
 
+    suspend fun getSongByIdSync(id: Int): Song? = withContext(Dispatchers.IO) {
+        songDao.getSongByIdSync(id)
+    }
+
     suspend fun getSongsByIdsSync(ids: List<Int>): List<Song> = withContext(Dispatchers.IO) {
         songDao.getSongsByIdsSync(ids)
     }

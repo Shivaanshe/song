@@ -60,6 +60,8 @@ class MusicService : MediaSessionService() {
         private const val CHANNEL_ID = "pulse_music_channel"
         private const val NOTIFICATION_ID = 1
         private const val TAG = "PulseDebug"
+        private const val PREFS_NAME = "pulse_prefs"
+        private const val KEY_LAST_SONG_ID = "last_played_song_id"
     }
 
     override fun onCreate() {
@@ -82,13 +84,8 @@ class MusicService : MediaSessionService() {
         httpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
         val baseFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
 
-        val cacheDataSourceFactory = CacheDataSource.Factory()
-            .setCache(cache)
-            .setUpstreamDataSourceFactory(baseFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-
         val resolvingDataSourceFactory = ResolvingDataSource.Factory(
-            cacheDataSourceFactory,
+            baseFactory,
             object : ResolvingDataSource.Resolver {
                 override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
                     val uriStr = dataSpec.uri.toString()
@@ -133,8 +130,13 @@ class MusicService : MediaSessionService() {
             }
         )
 
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(resolvingDataSourceFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingDataSourceFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             .build()
         
         player.addListener(object : Player.Listener {
@@ -151,10 +153,27 @@ class MusicService : MediaSessionService() {
                 }
 
                 if (mediaItem != null) {
+                    val mediaId = mediaItem.mediaId
+                    val songId = mediaId.toIntOrNull()
+                    if (songId != null) {
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                            .putInt(KEY_LAST_SONG_ID, songId)
+                            .apply()
+                    }
+
                     val query = mediaItem.localConfiguration?.uri?.getQueryParameter("query")
-                    query?.let { q ->
-                        resolvedCache[q]?.let { cached ->
-                            serviceScope.launch { updateActiveMetadata(q, cached.artwork) }
+                    val artworkUrl = mediaItem.mediaMetadata.extras?.getString("custom_artwork_url")
+                    
+                    val cached = query?.let { resolvedCache[it] }
+                    if (cached != null) {
+                        serviceScope.launch { updateActiveMetadata(mediaId, cached.artwork) }
+                    } else if (!artworkUrl.isNullOrEmpty() && mediaItem.mediaMetadata.artworkData == null) {
+                        // 🖼️ Independent Artwork Fetch for cached items or new sessions
+                        serviceScope.launch {
+                            val art = fetchImageAsByteArray(artworkUrl)
+                            if (art != null) {
+                                updateActiveMetadata(mediaId, art)
+                            }
                         }
                     }
                 }
@@ -242,7 +261,7 @@ class MusicService : MediaSessionService() {
                         if (resolved != null) {
                             resolvedCache[query] = resolved
                             withContext(Dispatchers.Main) {
-                                updateMetadataInQueue(i, query, resolved.artwork)
+                                updateMetadataInQueue(i, item.mediaId, resolved.artwork)
                             }
                         }
                     }
@@ -251,14 +270,14 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    private fun updateMetadataInQueue(index: Int, query: String, artworkBytes: ByteArray?) {
-        if (index < 0 || index >= player.mediaItemCount) return
+    private fun updateMetadataInQueue(index: Int, mediaId: String, artworkBytes: ByteArray?) {
+        if (index < 0 || index >= player.mediaItemCount || artworkBytes == null) return
         val item = player.getMediaItemAt(index)
         
         // 🛡️ Optimization: If item already has artwork, skip update to prevent transition loop
         if (item.mediaMetadata.artworkData != null) return
 
-        if (item.localConfiguration?.uri?.getQueryParameter("query") == query) {
+        if (item.mediaId == mediaId) {
             val updatedMetadata = item.mediaMetadata.buildUpon()
                 .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
                 .build()
@@ -274,8 +293,8 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    private fun updateActiveMetadata(query: String, artworkBytes: ByteArray?) {
-        updateMetadataInQueue(player.currentMediaItemIndex, query, artworkBytes)
+    private fun updateActiveMetadata(mediaId: String, artworkBytes: ByteArray?) {
+        updateMetadataInQueue(player.currentMediaItemIndex, mediaId, artworkBytes)
         mediaSession?.setCustomLayout(emptyList()) 
     }
 
@@ -296,7 +315,32 @@ class MusicService : MediaSessionService() {
         }
 
         override fun onPlaybackResumption(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+            val lastSongId = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(KEY_LAST_SONG_ID, -1)
+            
+            if (lastSongId == -1) {
+                return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+            }
+
+            val settableFuture = com.google.common.util.concurrent.SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            
+            serviceScope.launch {
+                val repository = SongApplication.getInstance().repository
+                val song = if (lastSongId >= 1_000_000) {
+                    repository.getStreamingItemsByIdsSync(listOf(lastSongId - 1_000_000))
+                        .firstOrNull()?.toSong()?.copy(id = lastSongId)
+                } else {
+                    repository.getSongByIdSync(lastSongId)
+                }
+
+                if (song != null) {
+                    val mediaItem = mapSongToMediaItem(song)
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(listOf(mediaItem), 0, 0L))
+                } else {
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+                }
+            }
+
+            return settableFuture
         }
 
         override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
@@ -324,30 +368,7 @@ class MusicService : MediaSessionService() {
                     
                     if (songs.isNotEmpty()) {
                         PulseLogger.log("Queue mapping: ${songs.size} items JIT-Ready")
-                        val mediaItems = songs.map { song ->
-                            val isLocal = song.audioUri.startsWith("/") || song.audioUri.startsWith("file://")
-                            val uri = if (isLocal) Uri.fromFile(File(song.audioUri)) else {
-                                val encodedQuery = Uri.encode(song.audioUri)
-                                val encodedArt = Uri.encode(song.imageUrl ?: "")
-                                Uri.parse("https://pulse.music/resolve/${song.id}?query=$encodedQuery&artwork_url=$encodedArt")
-                            }
-
-                            val metadata = MediaMetadata.Builder()
-                                .setTitle(song.title)
-                                .setArtist(song.artist)
-                                .setExtras(Bundle().apply { 
-                                    putString("custom_artwork_url", song.imageUrl)
-                                    putString("search_query", song.audioUri)
-                                })
-                                .build()
-                            
-                            MediaItem.Builder()
-                                .setMediaId(song.id.toString())
-                                .setUri(uri)
-                                .setCustomCacheKey(song.id.toString()) 
-                                .setMediaMetadata(metadata)
-                                .build()
-                        }
+                        val mediaItems = songs.map { mapSongToMediaItem(it) }
                         
                         currentQueue = songs
                         withContext(Dispatchers.Main) {
@@ -361,6 +382,32 @@ class MusicService : MediaSessionService() {
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
         }
+    }
+
+    private fun mapSongToMediaItem(song: Song): MediaItem {
+        val isLocal = song.audioUri.startsWith("/") || song.audioUri.startsWith("file://")
+        val uri = if (isLocal) Uri.fromFile(File(song.audioUri)) else {
+            val encodedQuery = Uri.encode(song.audioUri)
+            val encodedArt = Uri.encode(song.imageUrl ?: "")
+            Uri.parse("https://pulse.music/resolve/${song.id}?query=$encodedQuery&artwork_url=$encodedArt")
+        }
+
+        val metadata = MediaMetadata.Builder()
+            .setTitle(song.title)
+            .setArtist(song.artist)
+            .setArtworkUri(song.imageUrl?.let { Uri.parse(it) })
+            .setExtras(Bundle().apply { 
+                putString("custom_artwork_url", song.imageUrl)
+                putString("search_query", song.audioUri)
+            })
+            .build()
+        
+        return MediaItem.Builder()
+            .setMediaId(song.id.toString())
+            .setUri(uri)
+            .setCustomCacheKey(song.id.toString()) 
+            .setMediaMetadata(metadata)
+            .build()
     }
 
     private suspend fun fetchImageAsByteArray(url: String?): ByteArray? {
