@@ -6,10 +6,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface StreamingDao {
-    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl IS NULL ORDER BY id DESC")
+    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl IS NULL ORDER BY position ASC, id DESC")
     fun getAllTopLevelItems(): Flow<List<StreamingItem>>
 
-    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl ORDER BY id ASC")
+    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl ORDER BY position ASC, id ASC")
     fun getItemsForPlaylist(playlistUrl: String): Flow<List<StreamingItem>>
 
     @Query("SELECT * FROM streaming_items WHERE isFavorite = 1")
@@ -20,6 +20,9 @@ interface StreamingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItems(items: List<StreamingItem>)
+
+    @Update
+    suspend fun updateItems(items: List<StreamingItem>)
 
     @Delete
     suspend fun deleteItem(item: StreamingItem)
@@ -32,9 +35,15 @@ interface StreamingDao {
 
     @Query("SELECT * FROM streaming_items WHERE id IN (:itemIds)")
     suspend fun getItemsByIdsSync(itemIds: List<Int>): List<StreamingItem>
+
+    @Query("SELECT * FROM streaming_items WHERE isPlaylist = 0 ORDER BY position ASC, id DESC")
+    fun getAllSingleStreamingSongs(): Flow<List<StreamingItem>>
     
     @Query("UPDATE streaming_items SET title = :newTitle WHERE id = :itemId")
     suspend fun updateTitle(itemId: Int, newTitle: String)
+
+    @Query("UPDATE streaming_items SET parentPlaylistUrl = :playlistUrl WHERE id = :itemId")
+    suspend fun updateParentPlaylist(itemId: Int, playlistUrl: String?)
 
     @Query("UPDATE streaming_items SET isFavorite = :isFavorite WHERE id = :itemId")
     suspend fun updateFavorite(itemId: Int, isFavorite: Boolean)

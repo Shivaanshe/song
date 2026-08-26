@@ -17,6 +17,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,6 +63,10 @@ fun PlaylistDetailScreen(
         viewModel.getSongsInPlaylist(playlistId).collectAsState(initial = emptyList())
     }
     
+    var localSongsInPlaylist by remember(songsInPlaylist) { mutableStateOf(songsInPlaylist) }
+    var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedSongIds by viewModel.selectedSongIds.collectAsState()
     val currentSong by viewModel.currentPlayingSong.collectAsState()
@@ -317,35 +326,95 @@ fun PlaylistDetailScreen(
                     }
 
                     // Recommended Section (Songs in Playlist)
-                    items(songsInPlaylist, key = { it.id }) { song ->
-                        SongListItem(
-                            song = song,
-                            onPlayClick = {
-                                if (isSelectionMode) {
-                                    viewModel.toggleSongSelection(song.id)
-                                } else {
-                                    viewModel.playSong(song, songsInPlaylist)
-                                    onSongClick()
-                                }
-                            },
-                            onFavoriteToggle = {
-                                viewModel.updateFavorite(song, !song.isFavorite)
-                            },
-                            onDelete = {
-                                if (playlistId == -1) {
-                                    viewModel.updateFavorite(song, false)
-                                } else {
-                                    viewModel.removeSongFromPlaylist(song.id, playlistId)
-                                }
-                            },
-                            isSelected = selectedSongIds.contains(song.id),
-                            onLongClick = {
-                                viewModel.toggleSelectionMode(true)
-                                viewModel.toggleSongSelection(song.id)
-                            },
-                            selectionMode = isSelectionMode,
-                            isPlaying = currentSong?.id == song.id
+                    itemsIndexed(localSongsInPlaylist, key = { _, song -> song.id }) { index, song ->
+                        val isDragging = draggedItemIndex == index
+                        val itemTranslationY by animateFloatAsState(
+                            targetValue = if (isDragging) dragOffset else 0f,
+                            label = "DragTranslation"
                         )
+                        val itemScale by animateFloatAsState(
+                            targetValue = if (isDragging) 1.05f else 1f,
+                            label = "DragScale"
+                        )
+                        val itemZIndex = if (isDragging) 10f else 0f
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    translationY = itemTranslationY
+                                    scaleX = itemScale
+                                    scaleY = itemScale
+                                }
+                                .zIndex(itemZIndex)
+                                .pointerInput(localSongsInPlaylist) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            if (!isSelectionMode && playlistId != -1) {
+                                                draggedItemIndex = index
+                                            }
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            if (draggedItemIndex != null) {
+                                                change.consume()
+                                                dragOffset += dragAmount.y
+                                                
+                                                val targetIndex = (draggedItemIndex!! + (dragOffset / 72f).roundToInt())
+                                                    .coerceIn(0, localSongsInPlaylist.size - 1)
+                                                
+                                                if (targetIndex != draggedItemIndex) {
+                                                    val mutable = localSongsInPlaylist.toMutableList()
+                                                    val movedItem = mutable.removeAt(draggedItemIndex!!)
+                                                    mutable.add(targetIndex, movedItem)
+                                                    localSongsInPlaylist = mutable
+                                                    draggedItemIndex = targetIndex
+                                                    dragOffset = 0f
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            if (draggedItemIndex != null) {
+                                                viewModel.movePlaylistSong(playlistId, index, draggedItemIndex!!, localSongsInPlaylist)
+                                                draggedItemIndex = null
+                                                dragOffset = 0f
+                                            }
+                                        },
+                                        onDragCancel = {
+                                            draggedItemIndex = null
+                                            dragOffset = 0f
+                                        }
+                                    )
+                                }
+                        ) {
+                            SongListItem(
+                                song = song,
+                                onPlayClick = {
+                                    if (isSelectionMode) {
+                                        viewModel.toggleSongSelection(song.id)
+                                    } else {
+                                        viewModel.playSong(song, localSongsInPlaylist)
+                                        onSongClick()
+                                    }
+                                },
+                                onFavoriteToggle = {
+                                    viewModel.updateFavorite(song, !song.isFavorite)
+                                },
+                                onDelete = {
+                                    if (playlistId == -1) {
+                                        viewModel.updateFavorite(song, false)
+                                    } else {
+                                        viewModel.removeSongFromPlaylist(song.id, playlistId)
+                                    }
+                                },
+                                isSelected = selectedSongIds.contains(song.id),
+                                onLongClick = {
+                                    viewModel.toggleSelectionMode(true)
+                                    viewModel.toggleSongSelection(song.id)
+                                },
+                                selectionMode = isSelectionMode,
+                                isPlaying = currentSong?.id == song.id
+                            )
+                        }
                     }
                 }
 

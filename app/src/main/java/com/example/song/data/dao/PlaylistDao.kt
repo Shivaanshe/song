@@ -20,6 +20,9 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongToPlaylist(crossRef: PlaylistSongCrossRef)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlaylistSongCrossRefs(crossRefs: List<PlaylistSongCrossRef>)
+
     @Delete
     suspend fun removeSongFromPlaylist(crossRef: PlaylistSongCrossRef)
 
@@ -40,6 +43,7 @@ interface PlaylistDao {
         SELECT songs.* FROM songs 
         INNER JOIN playlist_song_cross_ref ON songs.id = playlist_song_cross_ref.songId 
         WHERE playlist_song_cross_ref.playlistId = :playlistId
+        ORDER BY playlist_song_cross_ref.position ASC
     """)
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>>
 

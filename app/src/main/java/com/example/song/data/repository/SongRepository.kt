@@ -76,6 +76,7 @@ class SongRepository(
     }
 
     val topLevelStreamingItems: Flow<List<StreamingItem>> = streamingDao.getAllTopLevelItems()
+    val allStreamingSongs: Flow<List<StreamingItem>> = streamingDao.getAllSingleStreamingSongs()
     val allSongIdsInPlaylists: Flow<List<Int>> = playlistDao.getAllSongIdsInPlaylists()
 
     suspend fun scanAndRestoreSongs() = withContext(Dispatchers.IO) {
@@ -108,6 +109,10 @@ class SongRepository(
         streamingDao.insertItems(items)
     }
 
+    suspend fun updateStreamingItems(items: List<StreamingItem>) {
+        streamingDao.updateItems(items)
+    }
+
     suspend fun deleteStreamingItem(item: StreamingItem) {
         if (item.isPlaylist) {
             streamingDao.deletePlaylistItems(item.youtubeUrl)
@@ -131,6 +136,10 @@ class SongRepository(
 
     suspend fun updateStreamingItemFavorite(itemId: Int, isFavorite: Boolean) {
         streamingDao.updateFavorite(itemId, isFavorite)
+    }
+
+    suspend fun updateStreamingItemParentPlaylist(itemId: Int, playlistUrl: String?) {
+        streamingDao.updateParentPlaylist(itemId, playlistUrl)
     }
 
     suspend fun insertSong(song: Song): Int {
@@ -183,6 +192,13 @@ class SongRepository(
 
     suspend fun removeSongFromPlaylist(songId: Int, playlistId: Int) {
         playlistDao.removeSongFromPlaylist(PlaylistSongCrossRef(playlistId, songId))
+    }
+
+    suspend fun updatePlaylistSongOrder(playlistId: Int, songs: List<Song>) {
+        val crossRefs = songs.mapIndexed { index, song ->
+            PlaylistSongCrossRef(playlistId, song.id, position = index)
+        }
+        playlistDao.insertPlaylistSongCrossRefs(crossRefs)
     }
 
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>> {

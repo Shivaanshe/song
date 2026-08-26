@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,16 +39,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.example.song.SongApplication
@@ -76,7 +79,9 @@ fun DiscoverScreen(
     var showAddMenu by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var youtubeUrl by remember { mutableStateOf("") }
-    var selectedPlaylist by remember { mutableStateOf<StreamingItem?>(null) }
+    var selectedPlaylist by rememberSaveable { mutableStateOf<StreamingItem?>(null) }
+    var showAddSongDialog by remember { mutableStateOf(false) }
+    val allStreamingSongs by viewModel.allStreamingSongs.collectAsState()
 
     val filteredItems = remember(items, searchQuery) {
         if (searchQuery.isBlank()) items
@@ -85,7 +90,7 @@ fun DiscoverScreen(
 
     val playlists = remember(filteredItems) { filteredItems.filter { it.isPlaylist } }
     val singleSongs = remember(filteredItems) {
-        filteredItems.filter { !it.isPlaylist && it.parentPlaylistUrl == null }
+        filteredItems.filter { !it.isPlaylist }
     }
 
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
@@ -308,7 +313,7 @@ fun DiscoverScreen(
                                 )
                             }
                             items(singleSongs, key = { it.id }) { item ->
-                                val isCurrentItemPlaying = currentPlayingSong?.id == item.id
+                                val isCurrentItemPlaying = currentPlayingSong?.id == (1_000_000 + item.id)
                                 StreamingItemCard(
                                     item = item,
                                     enabled = isEngineReady,
@@ -350,7 +355,11 @@ fun DiscoverScreen(
                     }
                 } else {
                     val playlistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist!!.youtubeUrl).collectAsState(initial = emptyList())
-                    val nonPlaylistItems = remember(playlistItems) { playlistItems.filter { !it.isPlaylist } }
+                    var localPlaylistItems by remember(playlistItems) { mutableStateOf(playlistItems.filter { !it.isPlaylist }) }
+                    
+                    var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
+                    var dragOffset by remember { mutableStateOf(0f) }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -358,13 +367,15 @@ fun DiscoverScreen(
                             .multiSelectDragHandler(
                                 listState = listState,
                                 onDragStart = { key ->
-                                    if (key is Int) {
-                                        viewModel.startRangeSelection(key, nonPlaylistItems.map { it.id }, isStreaming = true)
+                                    if (key is Int && !isSelectionMode) {
+                                        // We handle reordering via card long press
+                                    } else if (key is Int) {
+                                        viewModel.startRangeSelection(key, localPlaylistItems.map { it.id }, isStreaming = true)
                                     }
                                 },
                                 onDragUpdate = { key ->
                                     if (key is Int) {
-                                        viewModel.updateRangeSelection(key, nonPlaylistItems.map { it.id }, isStreaming = true)
+                                        viewModel.updateRangeSelection(key, localPlaylistItems.map { it.id }, isStreaming = true)
                                     }
                                 },
                                 onDragEnd = {
@@ -383,38 +394,102 @@ fun DiscoverScreen(
                                 )
                             )
                         }
-                        items(nonPlaylistItems, key = { it.id }) { item ->
-                            val isCurrentItemPlaying = currentPlayingSong?.id == item.id
-                            StreamingItemCard(
-                                item = item,
-                                enabled = isEngineReady,
-                                isResolving = resolvingUrlId == item.id,
-                                isPlaying = isPlaying && isCurrentItemPlaying,
-                                onClick = {
-                                    if (isSelectionMode) {
-                                        viewModel.toggleStreamingSelection(item.id)
-                                    } else if (isEngineReady) {
-                                        if (isCurrentItemPlaying) {
-                                            viewModel.togglePlayPause()
-                                        } else {
-                                            viewModel.playStreamingItem(item, nonPlaylistItems)
-                                            onSongClick()
-                                        }
-                                    }
-                                },
-                                onFavoriteToggle = {
-                                    viewModel.toggleStreamingFavorite(item)
-                                },
-                                onDelete = {
-                                    viewModel.deleteStreamingItem(item)
-                                },
-                                isSelected = selectedStreamingIds.contains(item.id),
-                                onLongClick = {
-                                    viewModel.toggleSelectionMode(true)
-                                    viewModel.toggleStreamingSelection(item.id)
-                                },
-                                selectionMode = isSelectionMode
+                        itemsIndexed(localPlaylistItems, key = { _, item -> item.id }) { index, item ->
+                            val isCurrentItemPlaying = currentPlayingSong?.id == (1_000_000 + item.id)
+                            val isDragging = draggedItemIndex == index
+                            
+                            val itemTranslationY by animateFloatAsState(
+                                targetValue = if (isDragging) dragOffset else 0f,
+                                label = "DragTranslation"
                             )
+                            
+                            val itemScale by animateFloatAsState(
+                                targetValue = if (isDragging) 1.05f else 1f,
+                                label = "DragScale"
+                            )
+                            
+                            val itemZIndex = if (isDragging) 10f else 0f
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        translationY = itemTranslationY
+                                        scaleX = itemScale
+                                        scaleY = itemScale
+                                    }
+                                    .zIndex(itemZIndex)
+                                    .pointerInput(localPlaylistItems) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { 
+                                                if (!isSelectionMode) {
+                                                    draggedItemIndex = index
+                                                }
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                if (draggedItemIndex != null) {
+                                                    change.consume()
+                                                    dragOffset += dragAmount.y
+                                                    
+                                                    // Move item logic
+                                                    val targetIndex = (draggedItemIndex!! + (dragOffset / 80f).roundToInt())
+                                                        .coerceIn(0, localPlaylistItems.size - 1)
+                                                    
+                                                    if (targetIndex != draggedItemIndex) {
+                                                        val mutable = localPlaylistItems.toMutableList()
+                                                        val movedItem = mutable.removeAt(draggedItemIndex!!)
+                                                        mutable.add(targetIndex, movedItem)
+                                                        localPlaylistItems = mutable
+                                                        draggedItemIndex = targetIndex
+                                                        dragOffset = 0f
+                                                    }
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                if (draggedItemIndex != null) {
+                                                    viewModel.moveStreamingItem(index, draggedItemIndex!!, localPlaylistItems)
+                                                    draggedItemIndex = null
+                                                    dragOffset = 0f
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                draggedItemIndex = null
+                                                dragOffset = 0f
+                                            }
+                                        )
+                                    }
+                            ) {
+                                StreamingItemCard(
+                                    item = item,
+                                    enabled = isEngineReady,
+                                    isResolving = resolvingUrlId == item.id,
+                                    isPlaying = isPlaying && isCurrentItemPlaying,
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            viewModel.toggleStreamingSelection(item.id)
+                                        } else if (isEngineReady) {
+                                            if (isCurrentItemPlaying) {
+                                                viewModel.togglePlayPause()
+                                            } else {
+                                                viewModel.playStreamingItem(item, localPlaylistItems)
+                                                onSongClick()
+                                            }
+                                        }
+                                    },
+                                    onFavoriteToggle = {
+                                        viewModel.toggleStreamingFavorite(item)
+                                    },
+                                    onDelete = {
+                                        viewModel.deleteStreamingItem(item)
+                                    },
+                                    isSelected = selectedStreamingIds.contains(item.id),
+                                    onLongClick = {
+                                        viewModel.toggleSelectionMode(true)
+                                        viewModel.toggleStreamingSelection(item.id)
+                                    },
+                                    selectionMode = isSelectionMode
+                                )
+                            }
                         }
                     }
                 }
@@ -818,6 +893,130 @@ fun DiscoverScreen(
                         }
                     }) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red)
+                    }
+                }
+            }
+        }
+
+        // Add Song FAB for Collections (Glass style)
+        if (selectedPlaylist != null && !isSelectionMode) {
+            FloatingActionButton(
+                onClick = { showAddSongDialog = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp)
+                    .padding(bottom = 80.dp), // Adjust for navigation bar
+                containerColor = Color.White.copy(alpha = 0.8f),
+                contentColor = Color(0xFFE91E63),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Song to Collection")
+            }
+        }
+
+        if (showAddSongDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showAddSongDialog = false }) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(550.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.White.copy(alpha = 0.4f))
+                        .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
+                    color = Color.Transparent
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "Add to Collection",
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF333333),
+                                    fontSize = 26.sp
+                                ),
+                                modifier = Modifier.padding(bottom = 20.dp)
+                            )
+
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)),
+                                color = Color.White.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(8.dp)
+                                ) {
+                                    items(allStreamingSongs) { item ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    viewModel.addStreamingItemToPlaylist(item.id, selectedPlaylist?.youtubeUrl)
+                                                    showAddSongDialog = false
+                                                }
+                                                .padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AsyncImage(
+                                                model = item.thumbnailUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(52.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color.Black.copy(alpha = 0.05f)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            Spacer(modifier = Modifier.width(16.dp))
+                                            Column {
+                                                Text(
+                                                    text = item.title,
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        color = Color(0xFF424242),
+                                                        fontSize = 18.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = item.artist ?: "YouTube Stream",
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = Color(0xFF666666),
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            TextButton(
+                                onClick = { showAddSongDialog = false },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text(
+                                    "Close",
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        color = Color(0xFFE91E63),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
             }

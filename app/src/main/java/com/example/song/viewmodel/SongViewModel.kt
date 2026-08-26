@@ -76,6 +76,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _topLevelStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
     val topLevelStreamingItems: StateFlow<List<StreamingItem>> = _topLevelStreamingItems.asStateFlow()
 
+    private val _allStreamingSongs = MutableStateFlow<List<StreamingItem>>(emptyList())
+    val allStreamingSongs: StateFlow<List<StreamingItem>> = _allStreamingSongs.asStateFlow()
+
     private val _isExtracting = MutableStateFlow(false)
     val isExtracting: StateFlow<Boolean> = _isExtracting.asStateFlow()
 
@@ -151,7 +154,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             repository.topLevelStreamingItems.collect { items ->
-                _topLevelStreamingItems.value = items.filter { it.isPlaylist || it.parentPlaylistUrl == null }
+                // Show all playlists and single songs (agnostic of parentPlaylistUrl)
+                _topLevelStreamingItems.value = items
+            }
+        }
+        viewModelScope.launch {
+            repository.allStreamingSongs.collect { items ->
+                _allStreamingSongs.value = items
             }
         }
 
@@ -242,9 +251,38 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addStreamingItemToPlaylist(itemId: Int, playlistUrl: String?) {
+        viewModelScope.launch {
+            repository.updateStreamingItemParentPlaylist(itemId, playlistUrl)
+        }
+    }
+
     fun addStreamingItems(items: List<StreamingItem>) {
         viewModelScope.launch {
             repository.insertStreamingItems(items)
+        }
+    }
+
+    fun moveStreamingItem(fromIndex: Int, toIndex: Int, currentItems: List<StreamingItem>) {
+        viewModelScope.launch {
+            val newList = currentItems.toMutableList()
+            val item = newList.removeAt(fromIndex)
+            newList.add(toIndex, item)
+            
+            val updatedItems = newList.mapIndexed { index, streamingItem ->
+                streamingItem.copy(position = index)
+            }
+            repository.updateStreamingItems(updatedItems)
+        }
+    }
+
+    fun movePlaylistSong(playlistId: Int, fromIndex: Int, toIndex: Int, currentSongs: List<Song>) {
+        viewModelScope.launch {
+            val newList = currentSongs.toMutableList()
+            val song = newList.removeAt(fromIndex)
+            newList.add(toIndex, song)
+            
+            repository.updatePlaylistSongOrder(playlistId, newList)
         }
     }
 
