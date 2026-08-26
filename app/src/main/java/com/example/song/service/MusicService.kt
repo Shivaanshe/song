@@ -62,6 +62,8 @@ class MusicService : MediaSessionService() {
         private const val TAG = "PulseDebug"
         private const val PREFS_NAME = "pulse_prefs"
         private const val KEY_LAST_SONG_ID = "last_played_song_id"
+        private const val KEY_LAST_QUEUE_IDS = "last_queue_ids"
+        private const val KEY_LAST_INDEX = "last_played_index"
     }
 
     override fun onCreate() {
@@ -158,6 +160,7 @@ class MusicService : MediaSessionService() {
                     if (songId != null) {
                         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                             .putInt(KEY_LAST_SONG_ID, songId)
+                            .putInt(KEY_LAST_INDEX, player.currentMediaItemIndex)
                             .apply()
                     }
 
@@ -315,9 +318,11 @@ class MusicService : MediaSessionService() {
         }
 
         override fun onPlaybackResumption(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            val lastSongId = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(KEY_LAST_SONG_ID, -1)
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            val savedQueue = prefs.getString(KEY_LAST_QUEUE_IDS, null)
+            val lastIndex = prefs.getInt(KEY_LAST_INDEX, 0)
             
-            if (lastSongId == -1) {
+            if (savedQueue.isNullOrEmpty()) {
                 return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
             }
 
@@ -325,16 +330,35 @@ class MusicService : MediaSessionService() {
             
             serviceScope.launch {
                 val repository = SongApplication.getInstance().repository
-                val song = if (lastSongId >= 1_000_000) {
-                    repository.getStreamingItemsByIdsSync(listOf(lastSongId - 1_000_000))
-                        .firstOrNull()?.toSong()?.copy(id = lastSongId)
-                } else {
-                    repository.getSongByIdSync(lastSongId)
+                val ids = savedQueue.split(",").mapNotNull { it.toIntOrNull() }
+                
+                if (ids.isEmpty()) {
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
+                    return@launch
                 }
 
-                if (song != null) {
-                    val mediaItem = mapSongToMediaItem(song)
-                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(listOf(mediaItem), 0, 0L))
+                val streamingIds = ids.filter { it >= 1_000_000 }.map { it - 1_000_000 }
+                val localIds = ids.filter { it < 1_000_000 }
+                
+                val streamingItems = if (streamingIds.isNotEmpty()) repository.getStreamingItemsByIdsSync(streamingIds) else emptyList()
+                val localSongs = if (localIds.isNotEmpty()) repository.getSongsByIdsSync(localIds) else emptyList()
+                
+                val allItemsMap = mutableMapOf<Int, Song>()
+                localSongs.forEach { allItemsMap[it.id] = it }
+                streamingItems.forEach { item ->
+                    val song = item.toSong().copy(id = 1_000_000 + item.id)
+                    allItemsMap[1_000_000 + item.id] = song
+                }
+                
+                val songs = ids.mapNotNull { allItemsMap[it] }
+                
+                if (songs.isNotEmpty()) {
+                    val mediaItems = songs.map { mapSongToMediaItem(it) }
+                    currentQueue = songs
+                    val startIndex = if (lastIndex in songs.indices) lastIndex else 0
+                    
+                    PulseLogger.log("Restoring Queue: Song ${startIndex + 1} of ${songs.size}")
+                    settableFuture.set(MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, 0L))
                 } else {
                     settableFuture.set(MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L))
                 }
@@ -347,6 +371,12 @@ class MusicService : MediaSessionService() {
             if (customCommand.customAction == "PLAY_QUEUE") {
                 val index = args.getInt("index", 0)
                 val ids = args.getIntegerArrayList("ids") ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
+                
+                // 🛡️ Save queue and index for persistence
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(KEY_LAST_QUEUE_IDS, ids.joinToString(","))
+                    .putInt(KEY_LAST_INDEX, index)
+                    .apply()
                 
                 serviceScope.launch {
                     val repository = SongApplication.getInstance().repository
