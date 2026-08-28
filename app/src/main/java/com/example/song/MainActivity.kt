@@ -121,7 +121,7 @@ fun MainApp(viewModel: SongViewModel) {
             Box(modifier = Modifier.fillMaxSize()) {
                 NavHost(
                     navController = navController,
-                    startDestination = "library",
+                    startDestination = "discover",
                     modifier = Modifier.padding(
                         if (currentDestination?.route == "player") PaddingValues() 
                         else innerPadding

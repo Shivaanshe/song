@@ -105,6 +105,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _isBackgroundOrbsEnabled = MutableStateFlow(true)
     val isBackgroundOrbsEnabled: StateFlow<Boolean> = _isBackgroundOrbsEnabled.asStateFlow()
 
+    private val _isArrangeModeEnabled = MutableStateFlow(false)
+    val isArrangeModeEnabled: StateFlow<Boolean> = _isArrangeModeEnabled.asStateFlow()
+
     private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
 
@@ -170,6 +173,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleBackgroundOrbs() {
         _isBackgroundOrbsEnabled.value = !_isBackgroundOrbsEnabled.value
         PulseLogger.log("Background Orbs: ${_isBackgroundOrbsEnabled.value}")
+    }
+
+    fun toggleArrangeMode(enabled: Boolean) {
+        _isArrangeModeEnabled.value = enabled
+        PulseLogger.log("Arrange Mode: $enabled")
     }
 
     fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
@@ -260,6 +268,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun addStreamingItems(items: List<StreamingItem>) {
         viewModelScope.launch {
             repository.insertStreamingItems(items)
+        }
+    }
+
+    fun updateStreamingItems(items: List<StreamingItem>) {
+        viewModelScope.launch {
+            repository.updateStreamingItems(items)
+        }
+    }
+
+    fun updatePlaylistSongOrder(playlistId: Int, songs: List<Song>) {
+        viewModelScope.launch {
+            repository.updatePlaylistSongOrder(playlistId, songs)
         }
     }
 

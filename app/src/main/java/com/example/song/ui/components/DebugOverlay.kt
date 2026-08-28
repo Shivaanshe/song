@@ -51,6 +51,7 @@ fun DebugOverlay(viewModel: SongViewModel) {
     val cachedKeys by viewModel.cachedKeys.collectAsState()
 
     val isOrbsEnabled by viewModel.isBackgroundOrbsEnabled.collectAsState()
+    val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         SmallFloatingActionButton(
@@ -120,6 +121,26 @@ fun DebugOverlay(viewModel: SongViewModel) {
                                         )
                                     }
                                     
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Arrange Mode", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                        Switch(
+                                            checked = isArrangeModeEnabled,
+                                            onCheckedChange = { 
+                                                viewModel.toggleArrangeMode(it)
+                                                if (it) showDialog = false // Close debugger if enabling
+                                            },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = Color(0xFFE91E63),
+                                                checkedTrackColor = Color(0xFFE91E63).copy(alpha = 0.5f)
+                                            ),
+                                            modifier = Modifier.scale(0.7f)
+                                        )
+                                    }
+
                                     currentSong?.let {
                                         DebugRowFixed("Active Song", it.title, Color(0xFFFF4081))
                                     }

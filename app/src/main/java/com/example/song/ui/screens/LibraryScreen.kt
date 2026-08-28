@@ -49,7 +49,7 @@ import com.example.song.SongApplication
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
-import com.example.song.util.multiSelectDragHandler
+import com.example.song.util.dragGestureHandler
 import com.example.song.viewmodel.DownloadState
 import com.example.song.viewmodel.SongViewModel
 import kotlinx.coroutines.launch
@@ -240,19 +240,19 @@ fun LibraryScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .multiSelectDragHandler(
+                        .dragGestureHandler(
                             listState = listState,
-                            onDragStart = { key ->
+                            onSelectStart = { key ->
                                 if (key is Int) {
                                     viewModel.startRangeSelection(key, songs.map { it.id })
                                 }
                             },
-                            onDragUpdate = { key ->
+                            onSelectUpdate = { key ->
                                 if (key is Int) {
                                     viewModel.updateRangeSelection(key, songs.map { it.id })
                                 }
                             },
-                            onDragEnd = {
+                            onSelectEnd = {
                                 viewModel.endRangeSelection()
                             }
                         ),

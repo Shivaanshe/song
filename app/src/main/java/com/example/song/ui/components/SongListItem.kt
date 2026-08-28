@@ -39,7 +39,9 @@ fun SongListItem(
     isSelected: Boolean = false,
     onLongClick: () -> Unit = {},
     selectionMode: Boolean = false,
-    isPlaying: Boolean = false
+    isPlaying: Boolean = false,
+    isArrangeMode: Boolean = false,
+    isDragging: Boolean = false
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -55,8 +57,8 @@ fun SongListItem(
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (isSelected) 0.95f else if (isPlaying) pulseScale else 1f,
-        animationSpec = if (isSelected || isPlaying) spring(dampingRatio = Spring.DampingRatioMediumBouncy) else tween(300),
+        targetValue = if (isDragging) 1.05f else if (isSelected) 0.95f else if (isPlaying) pulseScale else 1f,
+        animationSpec = if (isDragging || isSelected || isPlaying) spring(dampingRatio = Spring.DampingRatioMediumBouncy) else tween(300),
         label = "SelectionScale"
     )
 
@@ -64,8 +66,15 @@ fun SongListItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp)
-            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                if (isDragging) {
+                    shadowElevation = 16.dp.toPx()
+                }
+            }
             .combinedClickable(
+                enabled = !isArrangeMode,
                 onClick = {
                     if (selectionMode) onLongClick()
                     else onPlayClick()
@@ -73,8 +82,9 @@ fun SongListItem(
                 onLongClick = onLongClick
             )
             .border(
-                width = if (isSelected || isPlaying) 2.dp else 0.dp,
+                width = if (isDragging) 3.dp else if (isSelected || isPlaying) 2.dp else 0.dp,
                 brush = when {
+                    isDragging -> Brush.linearGradient(colors = listOf(Color(0xFFFF4081), Color(0xFFFF4081)))
                     isSelected -> Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081)))
                     isPlaying -> Brush.linearGradient(colors = listOf(Color(0xFF00E676), Color(0xFF1DE9B6)))
                     else -> Brush.linearGradient(colors = listOf(Color.Transparent, Color.Transparent))
@@ -94,6 +104,14 @@ fun SongListItem(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (isArrangeMode) {
+                Icon(
+                    imageVector = Icons.Default.DragIndicator,
+                    contentDescription = "Reorder",
+                    tint = Color(0xFF424242).copy(alpha = 0.6f),
+                    modifier = Modifier.padding(end = 12.dp).size(24.dp)
+                )
+            }
             Box {
                 AsyncImage(
                     model = song.imageUrl,

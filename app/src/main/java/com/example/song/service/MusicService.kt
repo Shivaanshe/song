@@ -47,6 +47,7 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var idleJob: Job? = null
     
     private lateinit var httpDataSourceFactory: OkHttpDataSource.Factory
     private var currentQueue: List<Song> = emptyList()
@@ -199,6 +200,16 @@ class MusicService : MediaSessionService() {
             
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 PulseLogger.log("Playback: ${if(isPlaying) "Playing" else "Paused"}")
+                idleJob?.cancel()
+                if (!isPlaying) {
+                    idleJob = serviceScope.launch {
+                        delay(5 * 60 * 1000) // 5 minutes
+                        if (!player.isPlaying) {
+                            PulseLogger.log("Idle for 5 minutes. Stopping service.")
+                            stopSelf()
+                        }
+                    }
+                }
             }
         })
 
@@ -210,6 +221,27 @@ class MusicService : MediaSessionService() {
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(MediaSessionCallback())
             .build()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val player = mediaSession?.player ?: return
+        if (!player.isPlaying) {
+            PulseLogger.log("App swiped away while paused. Strict termination triggered.")
+            
+            // 🧹 Instant cleanup
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                stopForeground(true)
+            }
+            
+            stopSelf()
+            mediaSession?.release()
+            
+            // 🛡️ Ensure process doesn't linger
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     private suspend fun performResolution(query: String, artworkUrl: String, isPriority: Boolean): ResolvedData? = withContext(Dispatchers.IO) {

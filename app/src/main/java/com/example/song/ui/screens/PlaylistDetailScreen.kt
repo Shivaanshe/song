@@ -2,7 +2,9 @@ package com.example.song.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -34,6 +36,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,8 +48,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.example.song.ui.components.SongListItem
-import com.example.song.util.multiSelectDragHandler
+import com.example.song.util.dragGestureHandler
 import com.example.song.viewmodel.SongViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,9 +68,34 @@ fun PlaylistDetailScreen(
         viewModel.getSongsInPlaylist(playlistId).collectAsState(initial = emptyList())
     }
     
-    var localSongsInPlaylist by remember(songsInPlaylist) { mutableStateOf(songsInPlaylist) }
+    var localSongsInPlaylist by remember { mutableStateOf(emptyList<com.example.song.data.model.Song>()) }
     var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableStateOf(0f) }
+    var isManualOrder by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(songsInPlaylist, draggedItemIndex, isManualOrder) {
+        if (draggedItemIndex == null && !isManualOrder) {
+            localSongsInPlaylist = songsInPlaylist
+        }
+    }
+    
+    var initialDragY by remember { mutableFloatStateOf(0f) }
+    var currentDragY by remember { mutableFloatStateOf(0f) }
+    var targetIndex by remember { mutableStateOf<Int?>(null) }
+    var measuredItemHeightPx by remember { mutableFloatStateOf(0f) }
+
+    val dragOffset = currentDragY - initialDragY
+
+    val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
+
+    // Clear drag state when Arrange Mode is disabled
+    LaunchedEffect(isArrangeModeEnabled) {
+        if (!isArrangeModeEnabled) {
+            draggedItemIndex = null
+            initialDragY = 0f
+            currentDragY = 0f
+            targetIndex = null
+        }
+    }
 
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedSongIds by viewModel.selectedSongIds.collectAsState()
@@ -103,20 +133,69 @@ fun PlaylistDetailScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .multiSelectDragHandler(
+                        .dragGestureHandler(
                             listState = listState,
-                            onDragStart = { key ->
+                            isReorderMode = isArrangeModeEnabled,
+                            onSelectStart = { key ->
                                 if (key is Int) {
-                                    viewModel.startRangeSelection(key, songsInPlaylist.map { it.id })
+                                    viewModel.startRangeSelection(key, localSongsInPlaylist.map { it.id })
                                 }
                             },
-                            onDragUpdate = { key ->
+                            onSelectUpdate = { key ->
                                 if (key is Int) {
-                                    viewModel.updateRangeSelection(key, songsInPlaylist.map { it.id })
+                                    viewModel.updateRangeSelection(key, localSongsInPlaylist.map { it.id })
                                 }
                             },
-                            onDragEnd = {
+                            onSelectEnd = {
                                 viewModel.endRangeSelection()
+                            },
+                            onReorderStart = { key, y ->
+                                if (key is Int && playlistId != -1) {
+                                    val index = localSongsInPlaylist.indexOfFirst { it.id == key }
+                                    if (index != -1) {
+                                        draggedItemIndex = index
+                                        targetIndex = index
+                                        initialDragY = y
+                                        currentDragY = y
+                                    }
+                                }
+                            },
+                            onReorderUpdate = { y ->
+                                if (draggedItemIndex != null) {
+                                    currentDragY = y
+                                    
+                                    val info = listState.layoutInfo
+                                    val itemUnderFinger = info.visibleItemsInfo.find { 
+                                        y.toInt() in it.offset..(it.offset + it.size)
+                                    }
+                                    
+                                    itemUnderFinger?.let { hitItem ->
+                                        val newTarget = localSongsInPlaylist.indexOfFirst { it.id == hitItem.key }
+                                        if (newTarget != -1 && newTarget != targetIndex) {
+                                            targetIndex = newTarget
+                                        }
+                                    }
+                                }
+                            },
+                            onReorderEnd = {
+                                if (draggedItemIndex != null && targetIndex != null) {
+                                    isManualOrder = true
+                                    val mutable = localSongsInPlaylist.toMutableList()
+                                    val song = mutable.removeAt(draggedItemIndex!!)
+                                    mutable.add(targetIndex!!, song)
+                                    localSongsInPlaylist = mutable
+                                    
+                                    viewModel.updatePlaylistSongOrder(playlistId, localSongsInPlaylist)
+                                    
+                                    scope.launch {
+                                        delay(800)
+                                        isManualOrder = false
+                                    }
+                                }
+                                draggedItemIndex = null
+                                targetIndex = null
+                                initialDragY = 0f
+                                currentDragY = 0f
                             }
                         ),
                     contentPadding = PaddingValues(bottom = 80.dp)
@@ -157,7 +236,7 @@ fun PlaylistDetailScreen(
                             )
 
                             // 3. Back Button (Safe Area)
-                            if (!isSelectionMode) {
+                            if (!isSelectionMode && !isArrangeModeEnabled) {
                                 IconButton(
                                     onClick = onBackClick,
                                     modifier = Modifier
@@ -171,6 +250,19 @@ fun PlaylistDetailScreen(
                                         contentDescription = "Back",
                                         tint = Color.White
                                     )
+                                }
+                            }
+
+                            // Done Button for Arrange Mode
+                            if (isArrangeModeEnabled) {
+                                TextButton(
+                                    onClick = { viewModel.toggleArrangeMode(false) },
+                                    modifier = Modifier
+                                        .statusBarsPadding()
+                                        .padding(16.dp)
+                                        .align(Alignment.TopEnd)
+                                ) {
+                                    Text("Done", fontWeight = FontWeight.Bold, color = Color.White)
                                 }
                             }
 
@@ -221,7 +313,7 @@ fun PlaylistDetailScreen(
                             }
 
                             // 5. Playlist Metadata (Centered)
-                            Column(
+                    Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .align(Alignment.BottomCenter)
@@ -229,9 +321,9 @@ fun PlaylistDetailScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = playlistName,
+                                    text = if (isArrangeModeEnabled) "Arrange Songs" else playlistName,
                                     style = MaterialTheme.typography.headlineLarge.copy(
-                                        color = Color.White,
+                                        color = if (isArrangeModeEnabled) Color(0xFFFF4081) else Color.White,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center
                                     ),
@@ -327,65 +419,81 @@ fun PlaylistDetailScreen(
 
                     // Recommended Section (Songs in Playlist)
                     itemsIndexed(localSongsInPlaylist, key = { _, song -> song.id }) { index, song ->
+                        val isCurrentItemPlaying = currentSong?.id == song.id
                         val isDragging = draggedItemIndex == index
+                        
+                        // Physical Gap Logic: Calculate displacement for sliding items
+                        val itemHeightPx = measuredItemHeightPx
+                        val targetDisplacement = when {
+                            isDragging -> dragOffset
+                            draggedItemIndex == null || targetIndex == null || itemHeightPx == 0f -> 0f
+                            draggedItemIndex!! < targetIndex!! && index > draggedItemIndex!! && index <= targetIndex!! -> -itemHeightPx
+                            draggedItemIndex!! > targetIndex!! && index < draggedItemIndex!! && index >= targetIndex!! -> itemHeightPx
+                            else -> 0f
+                        }
+
                         val itemTranslationY by animateFloatAsState(
-                            targetValue = if (isDragging) dragOffset else 0f,
-                            label = "DragTranslation"
+                            targetValue = targetDisplacement,
+                            label = "DragTranslation",
+                            animationSpec = if (isDragging) tween(0) else spring(stiffness = Spring.StiffnessLow)
                         )
+                        
                         val itemScale by animateFloatAsState(
-                            targetValue = if (isDragging) 1.05f else 1f,
-                            label = "DragScale"
+                            targetValue = if (isDragging) 1.1f else 1f,
+                            label = "DragScale",
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
                         )
-                        val itemZIndex = if (isDragging) 10f else 0f
+                        
+                        val isGhostSlot = !isDragging && targetIndex == index
 
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .animateItem()
+                                .zIndex(if (isDragging) 10f else 0f)
+                                .onGloballyPositioned { 
+                                    if (measuredItemHeightPx == 0f) {
+                                        measuredItemHeightPx = it.size.height.toFloat()
+                                    }
+                                }
                                 .graphicsLayer {
                                     translationY = itemTranslationY
                                     scaleX = itemScale
                                     scaleY = itemScale
-                                }
-                                .zIndex(itemZIndex)
-                                .pointerInput(localSongsInPlaylist) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = {
-                                            if (!isSelectionMode && playlistId != -1) {
-                                                draggedItemIndex = index
-                                            }
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            if (draggedItemIndex != null) {
-                                                change.consume()
-                                                dragOffset += dragAmount.y
-                                                
-                                                val targetIndex = (draggedItemIndex!! + (dragOffset / 72f).roundToInt())
-                                                    .coerceIn(0, localSongsInPlaylist.size - 1)
-                                                
-                                                if (targetIndex != draggedItemIndex) {
-                                                    val mutable = localSongsInPlaylist.toMutableList()
-                                                    val movedItem = mutable.removeAt(draggedItemIndex!!)
-                                                    mutable.add(targetIndex, movedItem)
-                                                    localSongsInPlaylist = mutable
-                                                    draggedItemIndex = targetIndex
-                                                    dragOffset = 0f
-                                                }
-                                            }
-                                        },
-                                        onDragEnd = {
-                                            if (draggedItemIndex != null) {
-                                                viewModel.movePlaylistSong(playlistId, index, draggedItemIndex!!, localSongsInPlaylist)
-                                                draggedItemIndex = null
-                                                dragOffset = 0f
-                                            }
-                                        },
-                                        onDragCancel = {
-                                            draggedItemIndex = null
-                                            dragOffset = 0f
-                                        }
-                                    )
+                                    if (isDragging) {
+                                        shadowElevation = 20.dp.toPx()
+                                        shape = RoundedCornerShape(20.dp)
+                                        clip = true
+                                    }
                                 }
                         ) {
+                            // The Ghost Placeholder (Dashed Box)
+                            if (isGhostSlot) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(with(LocalDensity.current) { measuredItemHeightPx.toDp() })
+                                        .graphicsLayer { translationY = -itemTranslationY }
+                                        .padding(horizontal = 24.dp, vertical = 8.dp)
+                                        .border(
+                                            width = 2.dp,
+                                            brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.5f), Color(0xFFFF4081).copy(alpha = 0.2f))),
+                                            shape = RoundedCornerShape(20.dp)
+                                        )
+                                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "DROP SONG HERE",
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFFFF4081).copy(alpha = 0.6f),
+                                            letterSpacing = 2.sp
+                                        )
+                                    )
+                                }
+                            }
+
                             SongListItem(
                                 song = song,
                                 onPlayClick = {
@@ -412,7 +520,9 @@ fun PlaylistDetailScreen(
                                     viewModel.toggleSongSelection(song.id)
                                 },
                                 selectionMode = isSelectionMode,
-                                isPlaying = currentSong?.id == song.id
+                                isPlaying = currentSong?.id == song.id,
+                                isArrangeMode = isArrangeModeEnabled,
+                                isDragging = isDragging
                             )
                         }
                     }

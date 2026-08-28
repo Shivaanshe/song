@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.example.song.ui.components.SongListItem
-import com.example.song.util.multiSelectDragHandler
+import com.example.song.util.dragGestureHandler
 import com.example.song.viewmodel.SongViewModel
 import kotlinx.coroutines.launch
 
@@ -80,19 +80,19 @@ fun FavoritesScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .multiSelectDragHandler(
+                        .dragGestureHandler(
                             listState = listState,
-                            onDragStart = { key ->
+                            onSelectStart = { key ->
                                 if (key is Int) {
                                     viewModel.startRangeSelection(key, favoriteSongs.map { it.id })
                                 }
                             },
-                            onDragUpdate = { key ->
+                            onSelectUpdate = { key ->
                                 if (key is Int) {
                                     viewModel.updateRangeSelection(key, favoriteSongs.map { it.id })
                                 }
                             },
-                            onDragEnd = {
+                            onSelectEnd = {
                                 viewModel.endRangeSelection()
                             }
                         ),
