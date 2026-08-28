@@ -63,6 +63,14 @@ fun FavoritesScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
     LaunchedEffect(favoriteSongs, draggedItemIndex, isManualOrder) { if (draggedItemIndex == null && !isManualOrder) localSongs = favoriteSongs }
     LaunchedEffect(isArrangeModeEnabled) { if (!isArrangeModeEnabled) { draggedItemIndex = null; activeDraggedItem = null; targetIndex = null } }
 
+    LaunchedEffect(listState) {
+        snapshotFlow { 
+            (listState.firstVisibleItemIndex * 200f) + listState.firstVisibleItemScrollOffset 
+        }.collect { offset ->
+            viewModel.updateGlobalScrollOffset(offset)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Color.Transparent,

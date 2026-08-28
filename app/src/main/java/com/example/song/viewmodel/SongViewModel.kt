@@ -108,6 +108,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _isArrangeModeEnabled = MutableStateFlow(false)
     val isArrangeModeEnabled: StateFlow<Boolean> = _isArrangeModeEnabled.asStateFlow()
 
+    private val _globalScrollOffset = MutableStateFlow(0f)
+    val globalScrollOffset: StateFlow<Float> = _globalScrollOffset.asStateFlow()
+
     private val _selectedSongIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedSongIds: StateFlow<Set<Int>> = _selectedSongIds.asStateFlow()
 
@@ -178,6 +181,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleArrangeMode(enabled: Boolean) {
         _isArrangeModeEnabled.value = enabled
         PulseLogger.log("Arrange Mode: $enabled")
+    }
+
+    fun updateGlobalScrollOffset(offset: Float) {
+        _globalScrollOffset.value = offset
     }
 
     fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {

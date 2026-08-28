@@ -51,8 +51,10 @@ class MusicService : MediaSessionService() {
     
     private lateinit var httpDataSourceFactory: OkHttpDataSource.Factory
     private var currentQueue: List<Song> = emptyList()
+    private var lastSavedSongId: Int = -1
 
     private val resolvedCache = ConcurrentHashMap<String, ResolvedData>()
+    private val artworkCache = ConcurrentHashMap<String, ByteArray>()
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
     data class ResolvedData(val url: String, val headers: Map<String, String>, val artwork: ByteArray?)
@@ -147,9 +149,10 @@ class MusicService : MediaSessionService() {
                 // 🛡️ Avoid feedback loop: Ignore transitions triggered by metadata/playlist updates
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
 
-                // 🛡️ Cancel stale resolution jobs
+                // 🛡️ Cancel stale resolution jobs immediately
                 activeJobs.forEach { (key, job) ->
-                    if (mediaItem?.localConfiguration?.uri?.getQueryParameter("query") != key) {
+                    val currentQuery = mediaItem?.localConfiguration?.uri?.getQueryParameter("query")
+                    if (currentQuery != key) {
                         job.cancel()
                         activeJobs.remove(key)
                     }
@@ -157,8 +160,11 @@ class MusicService : MediaSessionService() {
 
                 if (mediaItem != null) {
                     val mediaId = mediaItem.mediaId
+                    
+                    // 🔋 Debounced State Save (Avoid I/O thrashing)
                     val songId = mediaId.toIntOrNull()
-                    if (songId != null) {
+                    if (songId != null && songId != lastSavedSongId) {
+                        lastSavedSongId = songId
                         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                             .putInt(KEY_LAST_SONG_ID, songId)
                             .putInt(KEY_LAST_INDEX, player.currentMediaItemIndex)
@@ -284,20 +290,19 @@ class MusicService : MediaSessionService() {
             val currentIndex = withContext(Dispatchers.Main) { player.currentMediaItemIndex }
             val count = withContext(Dispatchers.Main) { player.mediaItemCount }
             
-            val indices = listOf(currentIndex + 1, currentIndex + 2, currentIndex - 1)
-            for (i in indices) {
-                if (i in 0 until count) {
-                    val item = withContext(Dispatchers.Main) { player.getMediaItemAt(i) }
-                    val query = item.localConfiguration?.uri?.getQueryParameter("query")
-                    val artUrl = item.localConfiguration?.uri?.getQueryParameter("artwork_url")
-                    
-                    if (query != null && !resolvedCache.containsKey(query)) {
-                        val resolved = performResolution(query, artUrl ?: "", isPriority = false)
-                        if (resolved != null) {
-                            resolvedCache[query] = resolved
-                            withContext(Dispatchers.Main) {
-                                updateMetadataInQueue(i, item.mediaId, resolved.artwork)
-                            }
+            // 🔋 Optimization: Only pre-resolve the immediate NEXT track to save CPU/Battery
+            val i = currentIndex + 1
+            if (i in 0 until count) {
+                val item = withContext(Dispatchers.Main) { player.getMediaItemAt(i) }
+                val query = item.localConfiguration?.uri?.getQueryParameter("query")
+                val artUrl = item.localConfiguration?.uri?.getQueryParameter("artwork_url")
+                
+                if (query != null && !resolvedCache.containsKey(query)) {
+                    val resolved = performResolution(query, artUrl ?: "", isPriority = false)
+                    if (resolved != null) {
+                        resolvedCache[query] = resolved
+                        withContext(Dispatchers.Main) {
+                            updateMetadataInQueue(i, item.mediaId, resolved.artwork)
                         }
                     }
                 }
@@ -474,6 +479,10 @@ class MusicService : MediaSessionService() {
 
     private suspend fun fetchImageAsByteArray(url: String?): ByteArray? {
         if (url.isNullOrEmpty()) return null
+        
+        // 🚀 Cache Hit check
+        artworkCache[url]?.let { return it }
+
         return try {
             val app = SongApplication.getInstance()
             val loader = ImageLoader(app)
@@ -483,8 +492,13 @@ class MusicService : MediaSessionService() {
                 val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
                 if (bitmap != null) {
                     val stream = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                    stream.toByteArray()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream) // 🔋 Low CPU compression
+                    val bytes = stream.toByteArray()
+                    
+                    // 🚀 Cache Store (limit size)
+                    if (artworkCache.size > 20) artworkCache.clear() 
+                    artworkCache[url] = bytes
+                    bytes
                 } else null
             } else null
         } catch (_: Exception) { null }
