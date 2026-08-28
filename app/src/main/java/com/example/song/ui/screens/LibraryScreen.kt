@@ -115,13 +115,21 @@ fun LibraryScreen(
                         if (isSearching) {
                             TextField(value = searchQuery, onValueChange = { viewModel.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), placeholder = { Text("Search songs...") }, singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.2f), unfocusedContainerColor = Color.White.copy(alpha = 0.1f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), shape = RoundedCornerShape(24.dp), trailingIcon = { IconButton(onClick = { isSearching = false; viewModel.setSearchQuery("") }) { Icon(Icons.Default.Close, contentDescription = "Close search") } })
                         } else {
-                            Text("My Library", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333)))
+                            Text(
+                                if (isArrangeModeEnabled) "Arrange Songs" else "My Library", 
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold, 
+                                    color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333)
+                                )
+                            )
                         }
                     },
-                    navigationIcon = { if (!isSearching) IconButton(onClick = { isSearching = true }, modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242)) } },
+                    navigationIcon = { if (!isSearching && !isArrangeModeEnabled) IconButton(onClick = { isSearching = true }, modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242)) } },
                     actions = { if (!isSearching) { 
                         if (isArrangeModeEnabled) {
-                            TextButton(onClick = { viewModel.toggleArrangeMode(false) }) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) }
+                            TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) { 
+                                Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) 
+                            }
                         } else {
                             IconButton(onClick = { showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) }
                         }

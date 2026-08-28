@@ -70,8 +70,22 @@ fun FavoritesScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
             topBar = {
                 CenterAlignedTopAppBar(
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                    title = { Text("Favorites", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333))) },
-                    actions = { if (isArrangeModeEnabled) TextButton(onClick = { viewModel.toggleArrangeMode(false) }) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) } }
+                    title = { 
+                        Text(
+                            if (isArrangeModeEnabled) "Arrange Songs" else "Favorites", 
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold, 
+                                color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333)
+                            )
+                        ) 
+                    },
+                    actions = { 
+                        if (isArrangeModeEnabled) {
+                            TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) {
+                                Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63))
+                            }
+                        }
+                    }
                 )
             }
         ) { padding ->

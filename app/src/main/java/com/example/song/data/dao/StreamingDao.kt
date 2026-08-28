@@ -12,7 +12,7 @@ interface StreamingDao {
     @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl ORDER BY position ASC, id ASC")
     fun getItemsForPlaylist(playlistUrl: String): Flow<List<StreamingItem>>
 
-    @Query("SELECT * FROM streaming_items WHERE isFavorite = 1")
+    @Query("SELECT * FROM streaming_items WHERE isFavorite = 1 ORDER BY position ASC, id DESC")
     fun getFavoriteItems(): Flow<List<StreamingItem>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

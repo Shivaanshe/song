@@ -69,10 +69,11 @@ class SongRepository(
                 audioUri = item.youtubeUrl,
                 imageUrl = item.thumbnailUrl,
                 isFavorite = item.isFavorite,
-                duration = item.duration
+                duration = item.duration,
+                position = item.position
             )
         }
-        local + mappedStreaming
+        (local + mappedStreaming).sortedWith(compareBy({ it.position }, { -it.id }))
     }
 
     val topLevelStreamingItems: Flow<List<StreamingItem>> = streamingDao.getAllTopLevelItems()
