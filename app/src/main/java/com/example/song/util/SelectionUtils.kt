@@ -24,7 +24,7 @@ fun Modifier.dragGestureHandler(
     onSelectStart: (Any) -> Unit = {},
     onSelectUpdate: (Any) -> Unit = {},
     onSelectEnd: () -> Unit = {},
-    onReorderStart: (Any, Float) -> Unit = { _, _ -> },
+    onReorderStart: (Any, Float, Float) -> Unit = { _, _, _ -> },
     onReorderUpdate: (Float) -> Unit = {},
     onReorderEnd: () -> Unit = {}
 ): Modifier = composed {
@@ -107,7 +107,7 @@ fun Modifier.dragGestureHandler(
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     val key = initialItem.key
                     if (isReorderMode) {
-                        currentOnReorderStart(key, down.position.y)
+                        currentOnReorderStart(key, down.position.y, initialItem.offset.toFloat())
                     } else {
                         currentOnSelectStart(key)
                     }
@@ -118,7 +118,6 @@ fun Modifier.dragGestureHandler(
                             val event = awaitPointerEvent(pass = PointerEventPass.Initial)
                             val change = event.changes.find { it.id == down.id } ?: break
                             
-                            // 🛡️ Force consumption to prevent list scroll/stutter
                             change.consume()
 
                             if (change.changedToUp()) {
@@ -142,7 +141,6 @@ fun Modifier.dragGestureHandler(
                             }
                         }
                     } finally {
-                        // 🧹 Guaranteed cleanup
                         active = false
                         dragYState.floatValue = -1f
                         if (isReorderMode) currentOnReorderEnd() else currentOnSelectEnd()

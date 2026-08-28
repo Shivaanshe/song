@@ -14,7 +14,7 @@ import com.example.song.data.model.StreamingItem
 
 @Database(
     entities = [Song::class, Playlist::class, PlaylistSongCrossRef::class, StreamingItem::class],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

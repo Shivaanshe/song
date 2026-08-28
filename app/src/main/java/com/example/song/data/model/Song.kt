@@ -15,5 +15,6 @@ data class Song(
     val audioUri: String,
     val imageUrl: String? = null,
     val isFavorite: Boolean = false,
-    val duration: Long = 0L
+    val duration: Long = 0L,
+    val position: Int = 0
 ) : Parcelable

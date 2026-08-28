@@ -17,19 +17,19 @@ interface SongDao {
     @Update
     suspend fun updateSong(song: Song)
 
-    @Query("SELECT * FROM songs ORDER BY id DESC")
+    @Query("SELECT * FROM songs ORDER BY position ASC, id DESC")
     fun getAllSongs(): Flow<List<Song>>
 
-    @Query("SELECT * FROM songs")
+    @Query("SELECT * FROM songs ORDER BY position ASC, id DESC")
     suspend fun getAllSongsSync(): List<Song>
 
     @Query("SELECT * FROM songs WHERE id = :songId")
     suspend fun getSongByIdSync(songId: Int): Song?
 
-    @Query("SELECT * FROM songs LIMIT 1")
+    @Query("SELECT * FROM songs ORDER BY position ASC, id DESC LIMIT 1")
     suspend fun getFirstSongSync(): Song?
 
-    @Query("SELECT * FROM songs WHERE isFavorite = 1")
+    @Query("SELECT * FROM songs WHERE isFavorite = 1 ORDER BY position ASC, id DESC")
     fun getFavoriteSongs(): Flow<List<Song>>
 
     @Query("SELECT * FROM songs WHERE id IN (:songIds)")

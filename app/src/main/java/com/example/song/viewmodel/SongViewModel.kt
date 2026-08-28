@@ -277,6 +277,36 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSongs(songs: List<Song>) {
+        viewModelScope.launch {
+            repository.updateSongs(songs)
+        }
+    }
+
+    fun reorderFavorites(songs: List<Song>) {
+        viewModelScope.launch {
+            // 1. Update local songs positions
+            val localSongsToUpdate = songs.filter { it.id < 1_000_000 }.map { song ->
+                song.copy(position = songs.indexOf(song))
+            }
+            if (localSongsToUpdate.isNotEmpty()) {
+                repository.updateSongs(localSongsToUpdate)
+            }
+            
+            // 2. Update streaming items positions
+            val allStreaming = repository.allStreamingSongs.first()
+            val updatedStreamingItems = allStreaming.map { item ->
+                val songEquivalent = songs.find { it.id == (1_000_000 + item.id) }
+                if (songEquivalent != null) {
+                    item.copy(position = songs.indexOf(songEquivalent))
+                } else item
+            }
+            if (updatedStreamingItems.isNotEmpty()) {
+                repository.updateStreamingItems(updatedStreamingItems)
+            }
+        }
+    }
+
     fun updatePlaylistSongOrder(playlistId: Int, songs: List<Song>) {
         viewModelScope.launch {
             repository.updatePlaylistSongOrder(playlistId, songs)

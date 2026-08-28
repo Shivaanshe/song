@@ -167,6 +167,10 @@ class SongRepository(
         songDao.updateSong(song)
     }
 
+    suspend fun updateSongs(songs: List<Song>) {
+        songs.forEach { songDao.updateSong(it) }
+    }
+
     suspend fun deleteSong(songId: Int) {
         val song = songDao.getSongByIdSync(songId)
         song?.let {
