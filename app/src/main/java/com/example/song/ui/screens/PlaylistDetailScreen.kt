@@ -262,7 +262,7 @@ fun PlaylistDetailScreen(
                                 Text(
                                     text = if (isArrangeModeEnabled) "Arrange Songs" else playlistName,
                                     style = MaterialTheme.typography.headlineLarge.copy(
-                                        color = if (isArrangeModeEnabled) Color(0xFFFF4081) else Color.White,
+                                        color = Color.White,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center
                                     ),

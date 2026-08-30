@@ -278,29 +278,36 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateSongs(songs: List<Song>) {
         viewModelScope.launch {
-            repository.updateSongs(songs)
+            val updatedSongs = songs.mapIndexed { index, song ->
+                song.copy(position = index)
+            }
+            repository.updateSongs(updatedSongs)
         }
     }
 
     fun reorderFavorites(songs: List<Song>) {
         viewModelScope.launch {
-            // 1. Update local songs positions
-            val localSongsToUpdate = songs.filter { it.id < 1_000_000 }.map { song ->
-                song.copy(position = songs.indexOf(song))
+            // Assign sequential positions starting from 0
+            val updatedSongs = songs.mapIndexed { index, song ->
+                song.copy(position = index)
             }
+            
+            // 1. Update local songs positions
+            val localSongsToUpdate = updatedSongs.filter { it.id < 1_000_000 }
             if (localSongsToUpdate.isNotEmpty()) {
                 repository.updateSongs(localSongsToUpdate)
             }
             
             // 2. Update streaming items positions
-            val allStreaming = repository.allStreamingSongs.first()
-            val updatedStreamingItems = allStreaming.map { item ->
-                val songEquivalent = songs.find { it.id == (1_000_000 + item.id) }
-                if (songEquivalent != null) {
-                    item.copy(position = songs.indexOf(songEquivalent))
-                } else item
-            }
-            if (updatedStreamingItems.isNotEmpty()) {
+            val streamingSongs = updatedSongs.filter { it.id >= 1_000_000 }
+            if (streamingSongs.isNotEmpty()) {
+                val allStreaming = repository.allStreamingSongs.first()
+                val updatedStreamingItems = allStreaming.map { item ->
+                    val songEquivalent = streamingSongs.find { it.id == (1_000_000 + item.id) }
+                    if (songEquivalent != null) {
+                        item.copy(position = songEquivalent.position)
+                    } else item
+                }
                 repository.updateStreamingItems(updatedStreamingItems)
             }
         }

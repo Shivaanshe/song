@@ -1,6 +1,7 @@
 package com.example.song.ui.components
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +39,13 @@ fun FluidMeshBackground(
                     translationX = maxPan - (offset * maxPan)
                 },
             contentScale = ContentScale.Crop
+        )
+
+        // 🌑 Dark Scrim for Readability
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f))
         )
 
         // Overlay existing UI content

@@ -113,7 +113,7 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
             topBar = {
                 if (selectedPlaylist != null) {
                     CenterAlignedTopAppBar(colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                        title = { Text(if (isArrangeModeEnabled) "Arrange Songs" else selectedPlaylist?.title ?: "Playlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF424242)), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        title = { Text(if (isArrangeModeEnabled) "Arrange Songs" else selectedPlaylist?.title ?: "Playlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         navigationIcon = { if (!isArrangeModeEnabled) { IconButton(onClick = { selectedPlaylist = null }, modifier = Modifier.padding(8.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF424242)) } } },
                         actions = { if (isArrangeModeEnabled) { TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) } } }
                     )
@@ -127,7 +127,7 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                                     if (isArrangeModeEnabled) "Arrange Songs" else "Discover", 
                                     style = MaterialTheme.typography.titleLarge.copy(
                                         fontWeight = FontWeight.Bold, 
-                                        color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF424242)
+                                        color = Color.White
                                     )
                                 ) 
                             } 
@@ -166,14 +166,30 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                         if (playlists.isNotEmpty()) {
                             item {
                                 Column(modifier = Modifier.padding(vertical = 16.dp)) {
-                                    Text("Collections", modifier = Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242)))
+                                    Text(
+                                        "Collections",
+                                        modifier = Modifier.padding(horizontal = 24.dp),
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(horizontal = 24.dp)) { items(playlists, key = { it.id }) { playlist -> StreamingPlaylistCard(item = playlist, isSelected = selectedStreamingIds.contains(playlist.id), selectionMode = isSelectionMode, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(playlist.id) else selectedPlaylist = playlist }, onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(playlist.id) }) } }
                                 }
                             }
                         }
                         if (localSingleSongs.isNotEmpty()) {
-                            item { Text("Recommended", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242))) }
+                            item {
+                                Text(
+                                    "Recommended",
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
                             itemsIndexed(localSingleSongs, key = { _, item -> item.id }) { index, item ->
                                 val isCurrentItemPlaying = currentPlayingSong?.id == (1_000_000 + item.id)
                                 val isDragging = draggedItemIndex == index
@@ -200,7 +216,16 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                         onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val newTarget = localPlaylistItems.indexOfFirst { it.id == hitItem.key }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } },
                         onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = localPlaylistItems.toMutableList(); val item = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, item); localPlaylistItems = mutable; viewModel.updateStreamingItems(localPlaylistItems.mapIndexed { index, si -> si.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
                     ), contentPadding = PaddingValues(bottom = 80.dp)) {
-                        item { Text("Playlist Content", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242))) }
+                        item {
+                            Text(
+                                "Playlist Content",
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            )
+                        }
                         itemsIndexed(localPlaylistItems, key = { _, item -> item.id }) { index, item ->
                             val isCurrentItemPlaying = currentPlayingSong?.id == (1_000_000 + item.id)
                             val isDragging = draggedItemIndex == index

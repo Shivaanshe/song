@@ -127,7 +127,7 @@ fun LibraryScreen(
                                 if (isArrangeModeEnabled) "Arrange Songs" else "My Library", 
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold, 
-                                    color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333)
+                                    color = Color.White
                                 )
                             )
                         }
@@ -167,7 +167,7 @@ fun LibraryScreen(
                     if (!isSearching) {
                         item {
                             Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
-                                Text("Collections", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242)))
+                                Text("Collections", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
                                 Spacer(modifier = Modifier.height(16.dp))
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(end = 24.dp)) {
                                     items(playlists, key = { it.id }) { playlist -> PlaylistCard(playlist, viewModel) { onPlaylistClick(playlist) } }
@@ -175,7 +175,7 @@ fun LibraryScreen(
                                 }
                             }
                         }
-                        item { Text("Library Tracks", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242))) }
+                        item { Text("Library Tracks", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)) }
                     }
                     itemsIndexed(localSongs, key = { _, song -> song.id }) { index, song ->
                         val isDragging = draggedItemIndex == index

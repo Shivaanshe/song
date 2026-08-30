@@ -83,7 +83,7 @@ fun FavoritesScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                             if (isArrangeModeEnabled) "Arrange Songs" else "Favorites", 
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold, 
-                                color = if (isArrangeModeEnabled) Color(0xFFE91E63) else Color(0xFF333333)
+                                color = Color.White
                             )
                         ) 
                     },
@@ -98,7 +98,7 @@ fun FavoritesScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
             }
         ) { padding ->
             if (localSongs.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("No favorite songs yet", style = MaterialTheme.typography.bodyLarge, color = Color(0xFF666666)) }
+                Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text("No favorite songs yet", style = MaterialTheme.typography.bodyLarge, color = Color.White) }
             } else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding).dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
                     onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, localSongs.map { it.id }) },
