@@ -8,6 +8,10 @@ import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.repository.SongRepository
 import com.yausername.ffmpeg.FFmpeg
@@ -22,7 +26,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
 
-class SongApplication : Application() {
+class SongApplication : Application(), ImageLoaderFactory {
 
     private val _isReady = MutableStateFlow(false)
     val isReady = _isReady.asStateFlow()
@@ -45,6 +49,24 @@ class SongApplication : Application() {
             .build()
     }
 
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.02) // Roughly 50MB on modern devices, or we can use fixed size
+                    .maxSizeBytes(50L * 1024 * 1024) // Strictly 50MB
+                    .build()
+            }
+            .okHttpClient { okHttpClient }
+            .build()
+    }
+
     companion object {
         private lateinit var instance: SongApplication
         fun getInstance(): SongApplication = instance
@@ -52,7 +74,8 @@ class SongApplication : Application() {
 
     @androidx.media3.common.util.UnstableApi
     private fun initPlayerCache() {
-        val cacheSize: Long = 300L * 1024 * 1024 
+        // 🔋 Strict 250MB limit for media files (Total Cache budget: 300MB = 250MB Media + 50MB Images)
+        val cacheSize: Long = 250L * 1024 * 1024 
         val cacheEvictor = LeastRecentlyUsedCacheEvictor(cacheSize)
         val databaseProvider = StandaloneDatabaseProvider(this)
         

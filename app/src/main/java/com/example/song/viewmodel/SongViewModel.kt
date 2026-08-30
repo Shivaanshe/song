@@ -102,9 +102,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     val cachedKeys: StateFlow<Set<String>> = com.example.song.SongApplication.getInstance().cachedKeys
 
     // 🛡️ Debug Settings
-    private val _isBackgroundOrbsEnabled = MutableStateFlow(true)
-    val isBackgroundOrbsEnabled: StateFlow<Boolean> = _isBackgroundOrbsEnabled.asStateFlow()
-
     private val _isArrangeModeEnabled = MutableStateFlow(false)
     val isArrangeModeEnabled: StateFlow<Boolean> = _isArrangeModeEnabled.asStateFlow()
 
@@ -171,11 +168,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         initMediaController(application)
-    }
-
-    fun toggleBackgroundOrbs() {
-        _isBackgroundOrbsEnabled.value = !_isBackgroundOrbsEnabled.value
-        PulseLogger.log("Background Orbs: ${_isBackgroundOrbsEnabled.value}")
     }
 
     fun toggleArrangeMode(enabled: Boolean) {

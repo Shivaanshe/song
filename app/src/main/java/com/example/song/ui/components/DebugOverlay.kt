@@ -50,7 +50,6 @@ fun DebugOverlay(viewModel: SongViewModel) {
     val currentTask by viewModel.currentTask.collectAsState()
     val cachedKeys by viewModel.cachedKeys.collectAsState()
 
-    val isOrbsEnabled by viewModel.isBackgroundOrbsEnabled.collectAsState()
     val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -103,23 +102,6 @@ fun DebugOverlay(viewModel: SongViewModel) {
                                     DebugRowFixed("Live Task", currentTask ?: "Idle", Color(0xFF81C784))
                                     DebugRowFixed("Extracting", isExtracting.toString(), if(isExtracting) Color.Yellow else Color.White)
                                     DebugRowFixed("Resolving ID", resolvingId?.toString() ?: "None", if(resolvingId != null) Color.Cyan else Color.White)
-                                    
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Background Orbs", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                                        Switch(
-                                            checked = isOrbsEnabled,
-                                            onCheckedChange = { viewModel.toggleBackgroundOrbs() },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = Color(0xFF81C784),
-                                                checkedTrackColor = Color(0xFF81C784).copy(alpha = 0.5f)
-                                            ),
-                                            modifier = Modifier.scale(0.7f)
-                                        )
-                                    }
                                     
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),

@@ -1,55 +1,46 @@
 package com.example.song.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.song.R
 
 /**
- * A highly optimized, scroll-reactive gradient background.
- * Zero CPU usage when static, subtle parallax effect during scroll.
+ * A spec-accurate horizontal panning background.
+ * Uses a single continuous asset and maps pager progress to translation.
  */
 @Composable
 fun FluidMeshBackground(
     modifier: Modifier = Modifier,
-    scrollOffset: Float = 0f,
+    pagerOffset: () -> Float = { 0f }, // Passed as a lambda to avoid full recomposition
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(modifier = modifier.fillMaxSize()) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
+        // 🖼️ The Panning Asset
+        Image(
+            painter = painterResource(id = R.drawable.screen),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    // 🔋 Parallax logic - Executed on RenderThread/Layer level
+                    scaleX = 1.2f
+                    scaleY = 1.2f
+                    
+                    val offset = pagerOffset()
+                    val maxPan = size.width * 0.1f
+                    translationX = maxPan - (offset * maxPan)
+                },
+            contentScale = ContentScale.Crop
+        )
 
-            // 🔋 Subtle parallax shift based on scroll
-            // Shifting by 15% of scroll amount creates a deep layered look
-            val parallaxShift = scrollOffset * 0.15f
-            
-            // Base Deep Gradient
-            drawRect(
-                brush = Brush.linearGradient(
-                    0.0f to Color(0xFF0F0821),
-                    0.3f to Color(0xFF1A0B40),
-                    0.6f to Color(0xFF0D1435),
-                    1.0f to Color(0xFF1E0A2E),
-                    start = Offset(0f, -parallaxShift),
-                    end = Offset(width, height - parallaxShift)
-                )
-            )
-            
-            // Secondary Glow Layer for depth (Static)
-            drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color(0xFFE91E63).copy(alpha = 0.05f), Color.Transparent),
-                    center = Offset(width * 0.8f, height * 0.2f),
-                    radius = width
-                )
-            )
-        }
+        // Overlay existing UI content
         content()
     }
 }

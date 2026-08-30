@@ -18,20 +18,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import com.example.song.ui.components.DebugOverlay
 import com.example.song.ui.components.FluidMeshBackground
 import com.example.song.ui.components.NowPlayingBar
-import com.example.song.ui.screens.LibraryScreen
-import com.example.song.ui.screens.PlayerScreen
-import com.example.song.ui.screens.PlaylistDetailScreen
+import com.example.song.ui.screens.*
 import com.example.song.ui.theme.SongTheme
 import com.example.song.viewmodel.SongViewModel
+import com.example.song.ui.components.GlassNavigationBar
 
 class MainActivity : ComponentActivity() {
 
@@ -94,12 +96,16 @@ fun MainApp(viewModel: SongViewModel) {
     val isPlaying by viewModel.isPlaying.collectAsState()
 
     // Screens where bottom bar should be visible
-    val mainScreens = listOf("library", "favorites", "discover")
+    val mainScreens = listOf("main") // Now we only have one top-level screen containing the pager
     val showBottomBar = currentDestination?.route in mainScreens
 
-    val scrollOffset by viewModel.globalScrollOffset.collectAsState()
+    // Pager State for top-level navigation (Discover, Favorites, Library)
+    val pagerState = rememberPagerState(pageCount = { 3 })
+    val scope = rememberCoroutineScope()
 
-    FluidMeshBackground(scrollOffset = scrollOffset) {
+    FluidMeshBackground(
+        pagerOffset = { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    ) {
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = {
@@ -113,7 +119,14 @@ fun MainApp(viewModel: SongViewModel) {
                         )
                     }
                     if (showBottomBar) {
-                        com.example.song.ui.components.GlassNavigationBar(navController)
+                        GlassNavigationBar(
+                            selectedPage = pagerState.targetPage,
+                            onPageSelected = { page ->
+                                scope.launch {
+                                    pagerState.animateScrollToPage(page)
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -121,31 +134,43 @@ fun MainApp(viewModel: SongViewModel) {
             Box(modifier = Modifier.fillMaxSize()) {
                 NavHost(
                     navController = navController,
-                    startDestination = "discover",
+                    startDestination = "main",
                     modifier = Modifier.padding(
                         if (currentDestination?.route == "player") PaddingValues() 
                         else innerPadding
                     )
                 ) {
-                    composable("library") {
-                        LibraryScreen(
-                            viewModel = viewModel,
-                            onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
-                            onFavoritesClick = { navController.navigate("favorites") },
-                            onSongClick = { navController.navigate("player") }
-                        )
-                    }
-                    composable("favorites") {
-                        com.example.song.ui.screens.FavoritesScreen(
-                            viewModel = viewModel,
-                            onSongClick = { navController.navigate("player") }
-                        )
-                    }
-                    composable("discover") {
-                        com.example.song.ui.screens.DiscoverScreen(
-                            viewModel = viewModel,
-                            onSongClick = { navController.navigate("player") }
-                        )
+                    composable("main") {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            key = { it }
+                        ) { page ->
+                            when (page) {
+                                0 -> {
+                                    DiscoverScreen(
+                                        viewModel = viewModel,
+                                        onSongClick = { navController.navigate("player") }
+                                    )
+                                }
+                                1 -> {
+                                    FavoritesScreen(
+                                        viewModel = viewModel,
+                                        onSongClick = { navController.navigate("player") }
+                                    )
+                                }
+                                2 -> {
+                                    LibraryScreen(
+                                        viewModel = viewModel,
+                                        onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                                        onFavoritesClick = { 
+                                            scope.launch { pagerState.animateScrollToPage(1) }
+                                        },
+                                        onSongClick = { navController.navigate("player") }
+                                    )
+                                }
+                            }
+                        }
                     }
                     composable(
                         "playlist/{playlistId}/{playlistName}",

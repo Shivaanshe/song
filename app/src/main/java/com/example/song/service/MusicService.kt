@@ -24,7 +24,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.example.song.MainActivity
@@ -485,9 +485,8 @@ class MusicService : MediaSessionService() {
 
         return try {
             val app = SongApplication.getInstance()
-            val loader = ImageLoader(app)
             val request = ImageRequest.Builder(app).data(url).allowHardware(false).build()
-            val result = loader.execute(request)
+            val result = app.imageLoader.execute(request)
             if (result is SuccessResult) {
                 val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
                 if (bitmap != null) {

@@ -28,15 +28,15 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 }
 
 @Composable
-fun GlassNavigationBar(navController: NavController) {
+fun GlassNavigationBar(
+    selectedPage: Int,
+    onPageSelected: (Int) -> Unit
+) {
     val items = listOf(
         Screen.Discover,
         Screen.Favorites,
         Screen.Library
     )
-
-    val navBackStackEntry = navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry.value?.destination
 
     Surface(
         modifier = Modifier
@@ -51,8 +51,8 @@ fun GlassNavigationBar(navController: NavController) {
             containerColor = Color.Transparent,
             modifier = Modifier.height(64.dp)
         ) {
-            items.forEach { screen ->
-                val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+            items.forEachIndexed { index, screen ->
+                val selected = selectedPage == index
                 
                 NavigationBarItem(
                     icon = {
@@ -64,15 +64,7 @@ fun GlassNavigationBar(navController: NavController) {
                     },
                     label = null,
                     selected = selected,
-                    onClick = {
-                        navController.navigate(screen.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
+                    onClick = { onPageSelected(index) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Color(0xFFE91E63),
                         unselectedIconColor = Color(0xFF424242),
