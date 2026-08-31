@@ -34,6 +34,10 @@ import com.example.song.ui.screens.*
 import com.example.song.ui.theme.SongTheme
 import com.example.song.viewmodel.SongViewModel
 import com.example.song.ui.components.GlassNavigationBar
+import com.example.song.ui.components.GlassNavigationRail
+import com.example.song.ui.components.CompactPlayerPane
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 
 class MainActivity : ComponentActivity() {
 
@@ -103,103 +107,152 @@ fun MainApp(viewModel: SongViewModel) {
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     FluidMeshBackground(
         pagerOffset = { pagerState.currentPage + pagerState.currentPageOffsetFraction }
     ) {
-        Scaffold(
-            containerColor = Color.Transparent,
-            bottomBar = {
-                Column(modifier = Modifier.navigationBarsPadding()) {
-                    if (currentDestination?.route != "player" && currentSong != null) {
-                        NowPlayingBar(
+        if (isLandscape && showBottomBar) {
+            // --- LANDSCAPE ADAPTIVE LAYOUT ---
+            Row(modifier = Modifier.fillMaxSize()) {
+                GlassNavigationRail(
+                    selectedPage = pagerState.targetPage,
+                    onPageSelected = { page ->
+                        scope.launch { pagerState.animateScrollToPage(page) }
+                    }
+                )
+
+                Row(modifier = Modifier.weight(1f)) {
+                    if (currentSong != null) {
+                        CompactPlayerPane(
                             song = currentSong,
                             isPlaying = isPlaying,
                             onTogglePlay = { viewModel.togglePlayPause() },
-                            onClick = { navController.navigate("player") }
+                            onSkipNext = { viewModel.skipToNext() },
+                            onSkipPrevious = { viewModel.skipToPrevious() },
+                            onClick = { navController.navigate("player") },
+                            modifier = Modifier.weight(0.4f)
                         )
                     }
-                    if (showBottomBar) {
-                        GlassNavigationBar(
-                            selectedPage = pagerState.targetPage,
-                            onPageSelected = { page ->
-                                scope.launch {
-                                    pagerState.animateScrollToPage(page)
-                                }
-                            }
+
+                    Box(modifier = Modifier.weight(0.6f)) {
+                        MainPagerContent(
+                            pagerState = pagerState,
+                            viewModel = viewModel,
+                            navController = navController,
+                            scope = scope
                         )
                     }
                 }
             }
-        ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize()) {
-                NavHost(
-                    navController = navController,
-                    startDestination = "main",
-                    modifier = Modifier.padding(
-                        if (currentDestination?.route == "player") PaddingValues() 
-                        else innerPadding
-                    )
-                ) {
-                    composable("main") {
-                        HorizontalPager(
-                            state = pagerState,
-                            modifier = Modifier.fillMaxSize(),
-                            key = { it }
-                        ) { page ->
-                            when (page) {
-                                0 -> {
-                                    DiscoverScreen(
-                                        viewModel = viewModel,
-                                        onSongClick = { navController.navigate("player") }
-                                    )
-                                }
-                                1 -> {
-                                    FavoritesScreen(
-                                        viewModel = viewModel,
-                                        onSongClick = { navController.navigate("player") }
-                                    )
-                                }
-                                2 -> {
-                                    LibraryScreen(
-                                        viewModel = viewModel,
-                                        onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
-                                        onFavoritesClick = { 
-                                            scope.launch { pagerState.animateScrollToPage(1) }
-                                        },
-                                        onSongClick = { navController.navigate("player") }
-                                    )
-                                }
+        } else {
+            // --- PORTRAIT OR NESTED LANDSCAPE LAYOUT ---
+            Scaffold(
+                containerColor = Color.Transparent,
+                bottomBar = {
+                    if (showBottomBar) {
+                        Column(modifier = Modifier.navigationBarsPadding()) {
+                            if (currentDestination?.route != "player" && currentSong != null) {
+                                NowPlayingBar(
+                                    song = currentSong,
+                                    isPlaying = isPlaying,
+                                    onTogglePlay = { viewModel.togglePlayPause() },
+                                    onClick = { navController.navigate("player") }
+                                )
                             }
+                            GlassNavigationBar(
+                                selectedPage = pagerState.targetPage,
+                                onPageSelected = { page ->
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(page)
+                                    }
+                                }
+                            )
                         }
                     }
-                    composable(
-                        "playlist/{playlistId}/{playlistName}",
-                        arguments = listOf(
-                            navArgument("playlistId") { type = NavType.IntType },
-                            navArgument("playlistName") { type = NavType.StringType }
-                        )
-                    ) { backStackEntry ->
-                        val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
-                        val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
-                        PlaylistDetailScreen(
-                            playlistId = playlistId,
-                            playlistName = playlistName,
-                            viewModel = viewModel,
-                            onBackClick = { navController.popBackStack() },
-                            onSongClick = { navController.navigate("player") }
-                        )
-                    }
-                    composable("player") {
-                        PlayerScreen(
-                            viewModel = viewModel,
-                            onBackClick = { navController.popBackStack() }
-                        )
+                }
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(if (showBottomBar) innerPadding else PaddingValues())
+                ) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = "main",
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        composable("main") {
+                            MainPagerContent(
+                                pagerState = pagerState,
+                                viewModel = viewModel,
+                                navController = navController,
+                                scope = scope
+                            )
+                        }
+                        composable(
+                            "playlist/{playlistId}/{playlistName}",
+                            arguments = listOf(
+                                navArgument("playlistId") { type = NavType.IntType },
+                                navArgument("playlistName") { type = NavType.StringType }
+                            )
+                        ) { backStackEntry ->
+                            val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
+                            val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
+                            PlaylistDetailScreen(
+                                playlistId = playlistId,
+                                playlistName = playlistName,
+                                viewModel = viewModel,
+                                onBackClick = { navController.popBackStack() },
+                                onSongClick = { navController.navigate("player") }
+                            )
+                        }
+                        composable("player") {
+                            PlayerScreen(
+                                viewModel = viewModel,
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
-                
-                // Floating Debug Button on top of everything
-                DebugOverlay(viewModel)
             }
+        }
+        
+        // Floating Debug Button on top of everything
+        DebugOverlay(viewModel)
+    }
+}
+
+@Composable
+fun MainPagerContent(
+    pagerState: androidx.compose.foundation.pager.PagerState,
+    viewModel: SongViewModel,
+    navController: androidx.navigation.NavController,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    HorizontalPager(
+        state = pagerState,
+        modifier = Modifier.fillMaxSize(),
+        key = { it }
+    ) { page ->
+        when (page) {
+            0 -> DiscoverScreen(
+                viewModel = viewModel,
+                onSongClick = { navController.navigate("player") }
+            )
+            1 -> FavoritesScreen(
+                viewModel = viewModel,
+                onSongClick = { navController.navigate("player") }
+            )
+            2 -> LibraryScreen(
+                viewModel = viewModel,
+                onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                onFavoritesClick = { 
+                    scope.launch { pagerState.animateScrollToPage(1) }
+                },
+                onSongClick = { navController.navigate("player") }
+            )
         }
     }
 }
