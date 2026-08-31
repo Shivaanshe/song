@@ -48,3 +48,19 @@ Built-in **Pulse Debugger** provides real-time telemetry:
 
 ---
 *Developed with a focus on stability, performance, and a premium Android experience.*
+
+## 📖 How to Use
+
+### Adding Songs
+- **Discover Page:** When you add a song from the Discover page, Pulse utilizes its **JIT Resolution Engine** to fetch the highest quality stream directly from the source. The song is added to your active session and can be instantly favorited.
+- **My Library:** Songs in My Library represent your local collection. Pulse scans your device storage and integrates these files seamlessly into the player, allowing for a unified listening experience between local files and online streams.
+
+### Key Features
+- **Glassmorphism UI:** A premium, modern interface with fluid "water-like" animations and adaptive landscape layouts.
+- **Fluid Navigation:** Navigation bars featuring smooth, synchronized bubble animations that follow your interaction in real-time.
+- **Adaptive Landscape:** A specialized layout for landscape mode that includes a floating minimal sidebar and an optimized player pane for ease of use.
+- **Smart JIT Loading:** Just-In-Time stream resolution ensures minimal data usage and maximum reliability.
+- **Pulse Debugger:** Real-time telemetry and performance monitoring built right into the app.
+
+### Performance Note
+- **Loading Time:** New songs typically take **3-4 seconds** to load. This includes the JIT resolution process, authenticated handshake, and initial buffering to ensure a skip-free listening experience.
