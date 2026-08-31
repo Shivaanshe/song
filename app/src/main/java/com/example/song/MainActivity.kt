@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,6 +36,7 @@ import com.example.song.ui.components.GlassNavigationBar
 import com.example.song.ui.components.GlassNavigationRail
 import com.example.song.ui.components.CompactPlayerPane
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import android.content.res.Configuration
 
 class MainActivity : ComponentActivity() {
@@ -115,15 +115,23 @@ fun MainApp(viewModel: SongViewModel) {
     ) {
         if (isLandscape && showBottomBar) {
             // --- LANDSCAPE ADAPTIVE LAYOUT ---
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+            ) {
                 GlassNavigationRail(
-                    selectedPage = pagerState.targetPage,
+                    pagerOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                     onPageSelected = { page ->
                         scope.launch { pagerState.animateScrollToPage(page) }
                     }
                 )
 
-                Row(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp) // Adjusted breathing room
+                ) {
                     if (currentSong != null) {
                         CompactPlayerPane(
                             song = currentSong,
@@ -132,11 +140,11 @@ fun MainApp(viewModel: SongViewModel) {
                             onSkipNext = { viewModel.skipToNext() },
                             onSkipPrevious = { viewModel.skipToPrevious() },
                             onClick = { navController.navigate("player") },
-                            modifier = Modifier.weight(0.4f)
+                            modifier = Modifier.weight(0.45f)
                         )
                     }
 
-                    Box(modifier = Modifier.weight(0.6f)) {
+                    Box(modifier = Modifier.weight(0.55f)) {
                         MainPagerContent(
                             pagerState = pagerState,
                             viewModel = viewModel,
@@ -162,7 +170,7 @@ fun MainApp(viewModel: SongViewModel) {
                                 )
                             }
                             GlassNavigationBar(
-                                selectedPage = pagerState.targetPage,
+                                pagerOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                                 onPageSelected = { page ->
                                     scope.launch {
                                         pagerState.animateScrollToPage(page)

@@ -1,7 +1,9 @@
 package com.example.song.ui.components
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -9,17 +11,19 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
+
+import androidx.compose.ui.graphics.lerp
+import kotlin.math.abs
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Discover : Screen("discover", "Discover", Icons.Default.MusicNote)
@@ -29,48 +33,70 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 
 @Composable
 fun GlassNavigationBar(
-    selectedPage: Int,
+    pagerOffset: Float,
     onPageSelected: (Int) -> Unit
 ) {
-    val items = listOf(
-        Screen.Discover,
-        Screen.Favorites,
-        Screen.Library
-    )
+    val items = listOf(Screen.Discover, Screen.Favorites, Screen.Library)
+    val itemWidth = 72.dp
+    val containerHeight = 64.dp
+    val bubbleHeight = 48.dp
 
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(32.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
-        color = Color.White.copy(alpha = 0.2f),
-        tonalElevation = 0.dp
+            .padding(bottom = 16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        NavigationBar(
-            containerColor = Color.Transparent,
-            modifier = Modifier.height(64.dp)
+        Surface(
+            modifier = Modifier
+                .wrapContentSize()
+                .height(containerHeight)
+                .clip(RoundedCornerShape(32.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
+            color = Color.White.copy(alpha = 0.2f),
+            tonalElevation = 0.dp
         ) {
-            items.forEachIndexed { index, screen ->
-                val selected = selectedPage == index
-                
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            imageVector = screen.icon,
-                            contentDescription = screen.title,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    label = null,
-                    selected = selected,
-                    onClick = { onPageSelected(index) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFFE91E63),
-                        unselectedIconColor = Color(0xFF424242),
-                        indicatorColor = Color.White.copy(alpha = 0.3f)
-                    )
+            Box(modifier = Modifier.padding(horizontal = 8.dp).wrapContentSize()) {
+                val bubbleX = itemWidth * pagerOffset
+                val bubbleY = (containerHeight - bubbleHeight) / 2
+
+                // 1. Sliding Bubble Background
+                Box(
+                    modifier = Modifier
+                        .offset(x = bubbleX, y = bubbleY)
+                        .size(width = itemWidth, height = bubbleHeight)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.White.copy(alpha = 0.2f))
                 )
+
+                // 2. Icon Layer
+                Row(
+                    modifier = Modifier.height(containerHeight),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items.forEachIndexed { index, screen ->
+                        val lerpFactor = (1f - abs(pagerOffset - index)).coerceIn(0f, 1f)
+                        val iconColor = lerp(Color.White.copy(alpha = 0.5f), Color.Red, lerpFactor)
+
+                        Box(
+                            modifier = Modifier
+                                .width(itemWidth)
+                                .fillMaxHeight()
+                                .clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null
+                                ) { onPageSelected(index) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = screen.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = iconColor
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -78,64 +104,69 @@ fun GlassNavigationBar(
 
 @Composable
 fun GlassNavigationRail(
-    selectedPage: Int,
+    pagerOffset: Float,
     onPageSelected: (Int) -> Unit
 ) {
-    val items = listOf(
-        Screen.Discover,
-        Screen.Favorites,
-        Screen.Library
-    )
+    val items = listOf(Screen.Discover, Screen.Favorites, Screen.Library)
+    val itemHeight = 64.dp
+    val railWidth = 56.dp
+    val bubbleWidth = 44.dp
+    val bubbleHeight = 48.dp
 
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxHeight()
-            .width(80.dp)
-            .padding(vertical = 16.dp, horizontal = 8.dp)
-            .clip(RoundedCornerShape(32.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
-        color = Color.White.copy(alpha = 0.2f),
-        tonalElevation = 0.dp
+            .padding(start = 12.dp, end = 4.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        NavigationRail(
-            containerColor = Color.Transparent,
-            modifier = Modifier.fillMaxHeight(),
-            header = {
-                Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = Color(0xFFE91E63),
-                    modifier = Modifier.size(32.dp).padding(bottom = 16.dp)
-                )
-            }
+        Surface(
+            modifier = Modifier
+                .width(railWidth)
+                .wrapContentHeight()
+                .clip(RoundedCornerShape(32.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
+            color = Color.White.copy(alpha = 0.2f),
+            tonalElevation = 0.dp
         ) {
-            Column(
-                modifier = Modifier.fillMaxHeight(),
-                verticalArrangement = Arrangement.Center
-            ) {
-                items.forEachIndexed { index, screen ->
-                    val selected = selectedPage == index
-                    
-                    NavigationRailItem(
-                        icon = {
+            Box(modifier = Modifier.padding(vertical = 12.dp).wrapContentSize()) {
+                val bubbleX = (railWidth - bubbleWidth) / 2
+                val bubbleY = (itemHeight * pagerOffset) + (itemHeight - bubbleHeight) / 2
+
+                // 1. Sliding Bubble Background
+                Box(
+                    modifier = Modifier
+                        .offset(x = bubbleX, y = bubbleY)
+                        .size(width = bubbleWidth, height = bubbleHeight)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Color.White.copy(alpha = 0.2f))
+                )
+
+                // 2. Icon Layer
+                Column(
+                    modifier = Modifier.width(railWidth),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    items.forEachIndexed { index, screen ->
+                        val lerpFactor = (1f - abs(pagerOffset - index)).coerceIn(0f, 1f)
+                        val iconColor = lerp(Color.White.copy(alpha = 0.5f), Color.Red, lerpFactor)
+
+                        Box(
+                            modifier = Modifier
+                                .size(width = railWidth, height = itemHeight)
+                                .clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null
+                                ) { onPageSelected(index) },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 imageVector = screen.icon,
-                                contentDescription = screen.title,
-                                modifier = Modifier.size(24.dp)
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = iconColor
                             )
-                        },
-                        label = { Text(screen.title, style = MaterialTheme.typography.labelSmall) },
-                        selected = selected,
-                        onClick = { onPageSelected(index) },
-                        colors = NavigationRailItemDefaults.colors(
-                            selectedIconColor = Color(0xFFE91E63),
-                            selectedTextColor = Color(0xFFE91E63),
-                            unselectedIconColor = Color(0xFF424242),
-                            unselectedTextColor = Color(0xFF424242),
-                            indicatorColor = Color.White.copy(alpha = 0.3f)
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    }
                 }
             }
         }

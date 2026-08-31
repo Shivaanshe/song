@@ -52,7 +52,7 @@ fun CompactPlayerPane(
     ) {
         Column(
             modifier = Modifier
-                .padding(20.dp)
+                .padding(16.dp)
                 .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -62,14 +62,15 @@ fun CompactPlayerPane(
                 model = song.imageUrl,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(160.dp)
+                    .size(140.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .shadow(12.dp, RoundedCornerShape(24.dp))
-                    .background(Color.White.copy(alpha = 0.1f)),
+                    .shadow(16.dp, RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp)),
                 contentScale = ContentScale.Crop
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Info
             Text(
@@ -81,26 +82,37 @@ fun CompactPlayerPane(
             )
             Text(
                 text = song.artist,
-                style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.7f)),
+                style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.6f)),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Controls
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                IconButton(onClick = onSkipPrevious) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                IconButton(
+                    onClick = onSkipPrevious,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                        .size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SkipPrevious,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
 
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(64.dp)
+                        .shadow(12.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(colors = listOf(Color(0xFFFF4081), Color(0xFFE040FB))))
                         .clickable { onTogglePlay() },
@@ -110,12 +122,22 @@ fun CompactPlayerPane(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(36.dp)
                     )
                 }
 
-                IconButton(onClick = onSkipNext) {
-                    Icon(Icons.Default.SkipNext, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                IconButton(
+                    onClick = onSkipNext,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                        .size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         }
