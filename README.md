@@ -51,16 +51,16 @@ Built-in **Pulse Debugger** provides real-time telemetry:
 
 ## 📖 How to Use
 
-### Adding Songs
-- **Discover Page:** When you add a song from the Discover page, Pulse utilizes its **JIT Resolution Engine** to fetch the highest quality stream directly from the source. The song is added to your active session and can be instantly favorited.
-- **My Library:** Songs in My Library represent your local collection. Pulse scans your device storage and integrates these files seamlessly into the player, allowing for a unified listening experience between local files and online streams.
+### Adding & Managing Music
+- **Discover Page (Smart Cloud Streaming):** When you add or favorite a song from Discover, Pulse saves only the lightweight track link and metadata to preserve your device storage. When you press play, the Just-In-Time (JIT) Resolution Engine dynamically fetches the highest quality audio stream and temporarily buffers it in a rolling cache. Once playback finishes, temporary streaming cache is automatically recycled to keep your phone running light and fast.
+- **My Library (Local Storage & Downloads):** This is your permanent offline hub. Tracks you explicitly choose to download are saved directly to your phone's local storage for zero-data offline playback. Pulse automatically indexes your device storage, seamlessly merging downloaded music and local audio files into one unified collection.
 
 ### Key Features
-- **Glassmorphism UI:** A premium, modern interface with fluid "water-like" animations and adaptive landscape layouts.
-- **Fluid Navigation:** Navigation bars featuring smooth, synchronized bubble animations that follow your interaction in real-time.
-- **Adaptive Landscape:** A specialized layout for landscape mode that includes a floating minimal sidebar and an optimized player pane for ease of use.
-- **Smart JIT Loading:** Just-In-Time stream resolution ensures minimal data usage and maximum reliability.
-- **Pulse Debugger:** Real-time telemetry and performance monitoring built right into the app.
+- **Glassmorphic Aesthetic:** Translucent, glass-textured interface featuring dynamic scroll-reactive color shifting and fluid, tactile drag-and-drop playlist reordering.
+- **Adaptive Landscape Mode:** Automatically reorganizes on screen rotation into a widescreen two-pane layout—anchoring artwork and playback controls on the left with a full scrollable tracklist on the right via a slim vertical Navigation Rail.
+- **Zero-Bloat JIT Streaming:** On-demand stream resolution eliminates storage buildup by avoiding unnecessary full-file downloads for cloud tracks.
+- **Pulse Debugger:** Built-in real-time telemetry and system diagnostics to monitor network bandwidth, active threads, and media cache allocation.
 
-### Performance Note
-- **Loading Time:** New songs typically take **3-4 seconds** to load. This includes the JIT resolution process, authenticated handshake, and initial buffering to ensure a skip-free listening experience.
+### Playback & Performance
+- **Initial Stream Handshake:** Cloud-resolved songs take roughly 2 to 4 seconds to initiate. This brief window allows the JIT engine to negotiate the source handshake, extract audio streams, and pre-fill the playback buffer to guarantee skip-free listening.
+- **Instant Local Skips:** Songs stored locally in My Library bypass the network resolution stage entirely, playing instantly with zero latency.
