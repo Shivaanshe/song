@@ -97,11 +97,37 @@ object SpotifyResolver {
                             }
                         }
                     } else if (isSingleTrack) {
-                        val trackTitle = apiMeta?.title ?: entity.optString("title")
-                        val trackArtist = apiMeta?.artist ?: entity.optString("subtitle").ifEmpty { 
-                            entity.optString("artist").ifEmpty { "Unknown Artist" } 
+                        var trackTitle = apiMeta?.title ?: entity.optString("title")
+                        
+                        // Enhanced Artist Extraction
+                        val artistsArray = entity.optJSONArray("artists")
+                        val artistFromEntity = if (artistsArray != null && artistsArray.length() > 0) {
+                            val names = mutableListOf<String>()
+                            for (j in 0 until artistsArray.length()) {
+                                names.add(artistsArray.getJSONObject(j).optString("name"))
+                            }
+                            names.joinToString(", ")
+                        } else {
+                            entity.optString("subtitle").ifEmpty { 
+                                entity.optString("artist").ifEmpty { 
+                                    entity.optJSONObject("album")?.optJSONArray("artists")?.optJSONObject(0)?.optString("name") ?: ""
+                                }
+                            }
                         }
-                        if (trackTitle != null && trackTitle.isNotEmpty()) {
+
+                        var trackArtist = apiMeta?.artist ?: artistFromEntity
+                        if (trackArtist.isEmpty()) trackArtist = "Unknown Artist"
+
+                        // Clean Title: oEmbed often adds suffixes like " - song by Artist"
+                        if (trackTitle.contains(" - song by ")) {
+                            trackTitle = trackTitle.substringBefore(" - song by ")
+                        } else if (trackTitle.contains(" - Single")) {
+                            trackTitle = trackTitle.substringBefore(" - Single")
+                        }
+
+                        if (trackTitle.isNotEmpty()) {
+                            PulseLogger.log("Extracted Track: $trackTitle by $trackArtist")
+                            
                             var trackThumb = extractSpotifyImage(entity)
                             if (trackThumb == null || (trackThumb.contains("spotifycdn.com/embed"))) {
                                 trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
