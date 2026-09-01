@@ -140,8 +140,15 @@ class MusicService : MediaSessionService() {
             .setUpstreamDataSourceFactory(resolvingDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .build()
+
         player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            .setAudioAttributes(audioAttributes, true) // true handles audio focus automatically
+            .setHandleAudioBecomingNoisy(true) // handle Bluetooth/Headphone disconnect
             .build()
         
         player.addListener(object : Player.Listener {
@@ -209,9 +216,9 @@ class MusicService : MediaSessionService() {
                 idleJob?.cancel()
                 if (!isPlaying) {
                     idleJob = serviceScope.launch {
-                        delay(5 * 60 * 1000) // 5 minutes
+                        delay(30 * 1000) // 30 seconds
                         if (!player.isPlaying) {
-                            PulseLogger.log("Idle for 5 minutes. Stopping service.")
+                            PulseLogger.log("Idle for 30 seconds. Stopping service.")
                             stopSelf()
                         }
                     }
