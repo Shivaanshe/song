@@ -51,6 +51,7 @@ import coil.compose.AsyncImage
 import com.example.song.SongApplication
 import com.example.song.data.model.StreamingItem
 import com.example.song.util.dragGestureHandler
+import com.example.song.util.horizontalDragGestureHandler
 import com.example.song.viewmodel.SongViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
@@ -175,7 +176,109 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                                         )
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(horizontal = 24.dp)) { items(playlists, key = { it.id }) { playlist -> StreamingPlaylistCard(item = playlist, isSelected = selectedStreamingIds.contains(playlist.id), selectionMode = isSelectionMode, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(playlist.id) else selectedPlaylist = playlist }, onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(playlist.id) }) } }
+
+                                    var draggedPlaylistIndex by remember { mutableStateOf<Int?>(null) }
+                                    var currentDragX by remember { mutableFloatStateOf(0f) }
+                                    var playlistTouchOffset by remember { mutableFloatStateOf(0f) }
+                                    var targetPlaylistIndex by remember { mutableStateOf<Int?>(null) }
+                                    val playlistListState = rememberLazyListState()
+                                    var localPlaylists by remember { mutableStateOf(emptyList<StreamingItem>()) }
+                                    var isPlaylistManualOrder by remember { mutableStateOf(false) }
+
+                                    LaunchedEffect(playlists, draggedPlaylistIndex, isPlaylistManualOrder) {
+                                        if (draggedPlaylistIndex == null && !isPlaylistManualOrder) localPlaylists = playlists
+                                    }
+
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        LazyRow(
+                                            state = playlistListState,
+                                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                            contentPadding = PaddingValues(horizontal = 24.dp),
+                                            modifier = Modifier.fillMaxWidth().horizontalDragGestureHandler(
+                                                listState = playlistListState,
+                                                isReorderMode = isArrangeModeEnabled,
+                                                onReorderStart = { key, fingerX, itemLeft ->
+                                                    if (key is Int) {
+                                                        val index = localPlaylists.indexOfFirst { it.id == key }
+                                                        if (index != -1) {
+                                                            draggedPlaylistIndex = index
+                                                            targetPlaylistIndex = index
+                                                            currentDragX = fingerX
+                                                            playlistTouchOffset = fingerX - itemLeft
+                                                        }
+                                                    }
+                                                },
+                                                onReorderUpdate = { x ->
+                                                    currentDragX = x
+                                                    if (draggedPlaylistIndex != null) {
+                                                        val info = playlistListState.layoutInfo
+                                                        val itemUnderFinger = info.visibleItemsInfo.find { x.toInt() in it.offset..(it.offset + it.size) }
+                                                        itemUnderFinger?.let { hitItem ->
+                                                            val newTarget = localPlaylists.indexOfFirst { it.id == hitItem.key }
+                                                            if (newTarget != -1 && newTarget != targetPlaylistIndex) targetPlaylistIndex = newTarget
+                                                        }
+                                                    }
+                                                },
+                                                onReorderEnd = {
+                                                    if (draggedPlaylistIndex != null && targetPlaylistIndex != null) {
+                                                        isPlaylistManualOrder = true
+                                                        val mutable = localPlaylists.toMutableList()
+                                                        val item = mutable.removeAt(draggedPlaylistIndex!!)
+                                                        mutable.add(targetPlaylistIndex!!, item)
+                                                        localPlaylists = mutable
+                                                        viewModel.updateStreamingItems(localPlaylists.mapIndexed { index, si -> si.copy(position = index) })
+                                                        scope.launch { delay(800); isPlaylistManualOrder = false }
+                                                    }
+                                                    draggedPlaylistIndex = null
+                                                    targetPlaylistIndex = null
+                                                }
+                                            )
+                                        ) {
+                                            itemsIndexed(localPlaylists, key = { _, it -> it.id }) { index, playlist ->
+                                                val isDragging = draggedPlaylistIndex == index
+                                                val itemWidthPx = with(LocalDensity.current) { 120.dp.toPx() + 16.dp.toPx() }
+                                                val targetDisplacement = when {
+                                                    isDragging -> 0f
+                                                    draggedPlaylistIndex == null || targetPlaylistIndex == null -> 0f
+                                                    draggedPlaylistIndex!! < targetPlaylistIndex!! && index > draggedPlaylistIndex!! && index <= targetPlaylistIndex!! -> -itemWidthPx
+                                                    draggedPlaylistIndex!! > targetPlaylistIndex!! && index < draggedPlaylistIndex!! && index >= targetPlaylistIndex!! -> itemWidthPx
+                                                    else -> 0f
+                                                }
+                                                val itemTranslationX by animateFloatAsState(targetValue = targetDisplacement, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "PlaylistDrag")
+                                                val isGhostSlot = !isDragging && targetPlaylistIndex == index
+
+                                                Box(modifier = Modifier.animateItem().zIndex(if (isGhostSlot) 1f else 0f).graphicsLayer { translationX = itemTranslationX }) {
+                                                    if (isGhostSlot) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(120.dp)
+                                                                .graphicsLayer { translationX = -itemTranslationX }
+                                                                .border(width = 2.dp, brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.5f), Color(0xFFFF4081).copy(alpha = 0.2f))), shape = RoundedCornerShape(24.dp))
+                                                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(24.dp)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text("DROP\nHERE", textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Color(0xFFFF4081).copy(alpha = 0.6f)))
+                                                        }
+                                                    }
+                                                    Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) {
+                                                        StreamingPlaylistCard(item = playlist, isSelected = selectedStreamingIds.contains(playlist.id), selectionMode = isSelectionMode, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(playlist.id) else selectedPlaylist = playlist }, onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(playlist.id) })
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Dragged Item Overlay
+                                        draggedPlaylistIndex?.let { index ->
+                                            localPlaylists.getOrNull(index)?.let { draggedItem ->
+                                                Box(modifier = Modifier.offset { IntOffset((currentDragX - playlistTouchOffset).roundToInt(), 0) }.zIndex(100f)) {
+                                                    val itemScale by animateFloatAsState(targetValue = 1.1f, label = "FloatingScale")
+                                                    Box(modifier = Modifier.graphicsLayer { scaleX = itemScale; scaleY = itemScale; shadowElevation = 32.dp.toPx() }) {
+                                                        StreamingPlaylistCard(item = draggedItem, isSelected = false, selectionMode = false, onClick = {})
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -613,6 +613,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updatePlaylistPositions(playlists: List<Playlist>) {
+        viewModelScope.launch {
+            repository.updatePlaylistPositions(playlists)
+        }
+    }
+
     fun deletePlaylist(playlistId: Int) {
         viewModelScope.launch {
             repository.deletePlaylist(playlistId)

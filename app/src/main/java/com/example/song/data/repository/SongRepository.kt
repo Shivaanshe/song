@@ -187,6 +187,10 @@ class SongRepository(
         return playlistDao.insertPlaylist(Playlist(name = name)).toInt()
     }
 
+    suspend fun updatePlaylistPositions(playlists: List<Playlist>) {
+        playlistDao.updatePlaylists(playlists)
+    }
+
     suspend fun deletePlaylist(playlistId: Int) {
         playlistDao.deletePlaylistWithCrossRefs(playlistId)
     }

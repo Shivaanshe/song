@@ -150,3 +150,131 @@ fun Modifier.dragGestureHandler(
         }
     }
 }
+
+/**
+ * A horizontal version of the drag handler for LazyRows.
+ */
+fun Modifier.horizontalDragGestureHandler(
+    listState: LazyListState,
+    isReorderMode: Boolean = false,
+    onSelectStart: (Any) -> Unit = {},
+    onSelectUpdate: (Any) -> Unit = {},
+    onSelectEnd: () -> Unit = {},
+    onReorderStart: (Any, Float, Float) -> Unit = { _, _, _ -> },
+    onReorderUpdate: (Float) -> Unit = {},
+    onReorderEnd: () -> Unit = {}
+): Modifier = composed {
+    val haptics = LocalHapticFeedback.current
+    val viewConfiguration = LocalViewConfiguration.current
+    
+    val currentOnSelectStart by rememberUpdatedState(onSelectStart)
+    val currentOnSelectUpdate by rememberUpdatedState(onSelectUpdate)
+    val currentOnSelectEnd by rememberUpdatedState(onSelectEnd)
+    val currentOnReorderStart by rememberUpdatedState(onReorderStart)
+    val currentOnReorderUpdate by rememberUpdatedState(onReorderUpdate)
+    val currentOnReorderEnd by rememberUpdatedState(onReorderEnd)
+    
+    val dragXState = remember { mutableFloatStateOf(-1f) }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            val x = dragXState.floatValue
+            if (x != -1f) {
+                val layoutInfo = listState.layoutInfo
+                val viewportWidth = layoutInfo.viewportSize.width.toFloat()
+                
+                if (viewportWidth > 0) {
+                    val scrollThresholdLeft = viewportWidth * 0.15f
+                    val scrollThresholdRight = viewportWidth * 0.85f
+                    var scrollAmount = 0f
+
+                    if (x in 0f..scrollThresholdLeft) {
+                        val intensity = ((scrollThresholdLeft - x) / scrollThresholdLeft).coerceIn(0f, 1f)
+                        scrollAmount = -(intensity * 40f)
+                    } else if (x > scrollThresholdRight && x <= viewportWidth) {
+                        val intensity = ((x - scrollThresholdRight) / (viewportWidth - scrollThresholdRight)).coerceIn(0f, 1f)
+                        scrollAmount = intensity * 40f
+                    }
+                    
+                    if (scrollAmount != 0f) {
+                        listState.scrollBy(scrollAmount)
+                        if (isReorderMode) currentOnReorderUpdate(x)
+                    }
+                }
+            }
+            delay(10) 
+        }
+    }
+
+    pointerInput(isReorderMode) {
+        awaitEachGesture {
+            val down = awaitFirstDown(pass = PointerEventPass.Initial)
+            var active = false
+            
+            val timeout = if (isReorderMode) 200L else viewConfiguration.longPressTimeoutMillis
+            val trigger = withTimeoutOrNull(timeout) {
+                var pointer = down
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.find { it.id == pointer.id } ?: break
+                    if (change.changedToUp()) break
+                    if (change.positionChange().getDistance() > viewConfiguration.touchSlop) return@withTimeoutOrNull "moved"
+                    pointer = change
+                }
+                "up"
+            }
+
+            if (trigger == null) {
+                val initialItem = listState.layoutInfo.visibleItemsInfo.find { 
+                    val itemLeft = it.offset
+                    val itemRight = it.offset + it.size
+                    down.position.x.toInt() in itemLeft..itemRight
+                }
+
+                if (initialItem != null) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val key = initialItem.key
+                    if (isReorderMode) {
+                        currentOnReorderStart(key, down.position.x, initialItem.offset.toFloat())
+                    } else {
+                        currentOnSelectStart(key)
+                    }
+                    active = true
+
+                    try {
+                        while (active) {
+                            val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                            val change = event.changes.find { it.id == down.id } ?: break
+                            
+                            change.consume()
+
+                            if (change.changedToUp()) {
+                                active = false
+                                break
+                            }
+
+                            val currentX = change.position.x
+                            dragXState.floatValue = currentX
+                            
+                            if (isReorderMode) {
+                                currentOnReorderUpdate(currentX)
+                            } else {
+                                val info = listState.layoutInfo
+                                val itemUnderFinger = info.visibleItemsInfo.find { 
+                                    val itemLeft = it.offset
+                                    val itemRight = it.offset + it.size
+                                    currentX.toInt() in itemLeft..itemRight
+                                }
+                                itemUnderFinger?.let { currentOnSelectUpdate(it.key) }
+                            }
+                        }
+                    } finally {
+                        active = false
+                        dragXState.floatValue = -1f
+                        if (isReorderMode) currentOnReorderEnd() else currentOnSelectEnd()
+                    }
+                }
+            }
+        }
+    }
+}
