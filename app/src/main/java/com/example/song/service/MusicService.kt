@@ -60,8 +60,6 @@ class MusicService : MediaSessionService() {
     data class ResolvedData(val url: String, val headers: Map<String, String>, val artwork: ByteArray?)
 
     companion object {
-        private const val CHANNEL_ID = "pulse_music_channel"
-        private const val NOTIFICATION_ID = 1
         private const val TAG = "PulseDebug"
         private const val PREFS_NAME = "pulse_prefs"
         private const val KEY_LAST_SONG_ID = "last_played_song_id"
@@ -71,17 +69,6 @@ class MusicService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        
-        createNotificationChannel()
-        val loadingNotification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("Pulse Music")
-            .setContentText("Initializing engine...")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
-        
-        startForeground(NOTIFICATION_ID, loadingNotification)
 
         val app = SongApplication.getInstance()
         val cache = app.playerCache
@@ -239,7 +226,7 @@ class MusicService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player ?: return
         if (!player.isPlaying) {
-            PulseLogger.log("App swiped away while paused. Strict termination triggered.")
+            PulseLogger.log("App swiped away while paused. Graceful termination triggered.")
             
             // 🧹 Instant cleanup
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -250,9 +237,6 @@ class MusicService : MediaSessionService() {
             
             stopSelf()
             mediaSession?.release()
-            
-            // 🛡️ Ensure process doesn't linger
-            android.os.Process.killProcess(android.os.Process.myPid())
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -514,13 +498,7 @@ class MusicService : MediaSessionService() {
         return Song(id = id, title = title, artist = artist ?: "Unknown Artist", audioUri = youtubeUrl, imageUrl = thumbnailUrl, duration = duration)
     }
 
-    private fun createNotificationChannel() {
-        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Pulse Music", NotificationManager.IMPORTANCE_LOW)
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
+
 
     override fun onDestroy() {
         serviceScope.cancel()
