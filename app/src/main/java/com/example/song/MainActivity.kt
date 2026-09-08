@@ -2,9 +2,11 @@ package com.example.song
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -38,6 +40,9 @@ import com.example.song.ui.components.CompactPlayerPane
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import android.content.res.Configuration
+import androidx.compose.foundation.pager.PagerState
+import androidx.navigation.NavController
+import kotlinx.coroutines.CoroutineScope
 
 class MainActivity : ComponentActivity() {
 
@@ -95,6 +100,10 @@ fun MainApp(viewModel: SongViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+
+    BackHandler(enabled = currentDestination?.route != "main" && currentDestination?.route != null) {
+        navController.popBackStack()
+    }
     
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
@@ -207,7 +216,7 @@ fun MainApp(viewModel: SongViewModel) {
                             )
                         ) { backStackEntry ->
                             val playlistId = backStackEntry.arguments?.getInt("playlistId") ?: 0
-                            val playlistName = backStackEntry.arguments?.getString("playlistName") ?: ""
+                            val playlistName = Uri.decode(backStackEntry.arguments?.getString("playlistName") ?: "")
                             PlaylistDetailScreen(
                                 playlistId = playlistId,
                                 playlistName = playlistName,
@@ -234,10 +243,10 @@ fun MainApp(viewModel: SongViewModel) {
 
 @Composable
 fun MainPagerContent(
-    pagerState: androidx.compose.foundation.pager.PagerState,
+    pagerState: PagerState,
     viewModel: SongViewModel,
-    navController: androidx.navigation.NavController,
-    scope: kotlinx.coroutines.CoroutineScope
+    navController: NavController,
+    scope: CoroutineScope
 ) {
     HorizontalPager(
         state = pagerState,
@@ -255,7 +264,7 @@ fun MainPagerContent(
             )
             2 -> LibraryScreen(
                 viewModel = viewModel,
-                onPlaylistClick = { navController.navigate("playlist/${it.id}/${it.name}") },
+                onPlaylistClick = { navController.navigate("playlist/${it.id}/${Uri.encode(it.name)}") },
                 onFavoritesClick = { 
                     scope.launch { pagerState.animateScrollToPage(1) }
                 },

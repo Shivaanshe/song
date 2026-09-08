@@ -1,5 +1,6 @@
 package com.example.song.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import kotlinx.coroutines.delay
@@ -74,6 +75,9 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
     var showAddDialog by remember { mutableStateOf(false) }
     var youtubeUrl by remember { mutableStateOf("") }
     var selectedPlaylist by rememberSaveable { mutableStateOf<StreamingItem?>(null) }
+    BackHandler(enabled = selectedPlaylist != null) {
+        selectedPlaylist = null
+    }
     var showAddSongDialog by remember { mutableStateOf(false) }
     val allStreamingSongs by viewModel.allStreamingSongs.collectAsState()
     val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
