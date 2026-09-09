@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import android.content.ComponentName
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import androidx.annotation.OptIn
@@ -38,6 +40,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 @OptIn(UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
@@ -49,6 +54,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         application.filesDir
     )
     private var mediaController: MediaController? = null
+
+    private fun isConnectedToInternet(): Boolean {
+        val context = getApplication<Application>()
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
 
     private val _allSongs = MutableStateFlow<List<Song>>(emptyList())
     val allSongs: StateFlow<List<Song>> = _allSongs.asStateFlow()
@@ -195,6 +208,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchStreamingMetadata(url: String) {
         viewModelScope.launch {
+            if (!isConnectedToInternet()) {
+                _extractionError.value = "App is offline. Please check your Internet connection."
+                return@launch
+            }
             _isExtracting.value = true
             _extractionError.value = null
             PulseLogger.log("Searching URL: $url")
@@ -223,10 +240,21 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 val errorMsg = e.localizedMessage ?: ""
                 PulseLogger.log("Extraction error: $errorMsg", isError = true)
-                _extractionError.value = when {
-                    errorMsg.contains("429") -> "YouTube is rate-limiting requests. Please try again in a few minutes."
-                    errorMsg.contains("confirm you're not a bot") -> "Bot detection triggered. Try a different link or wait."
-                    else -> "Extraction failed: $errorMsg"
+                val isOffline = !isConnectedToInternet() ||
+                               errorMsg.contains("Unable to resolve host", ignoreCase = true) == true ||
+                               errorMsg.contains("No address associated", ignoreCase = true) == true ||
+                               e is UnknownHostException ||
+                               e is SocketTimeoutException ||
+                               e is IOException
+
+                _extractionError.value = if (isOffline) {
+                    "App is offline. Please check your Internet connection."
+                } else {
+                    when {
+                        errorMsg.contains("429") -> "YouTube is rate-limiting requests. Please try again in a few minutes."
+                        errorMsg.contains("confirm you're not a bot") -> "Bot detection triggered. Try a different link or wait."
+                        else -> "Extraction failed: $errorMsg"
+                    }
                 }
                 e.printStackTrace()
             } finally {
@@ -409,7 +437,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                         Log.e("SongViewModel", "Playback error: ${error.message}", error)
                         PulseLogger.log("Engine error: ${error.localizedMessage}", isError = true)
-                        _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                        
+                        val isOffline = !isConnectedToInternet() || 
+                                       error.message?.contains("Unable to resolve host", ignoreCase = true) == true ||
+                                       error.message?.contains("No address associated", ignoreCase = true) == true ||
+                                       error.message?.contains("Network is unreachable", ignoreCase = true) == true ||
+                                       error.cause is UnknownHostException ||
+                                       error.cause is SocketTimeoutException ||
+                                       error.cause is IOException
+
+                        _playbackError.value = if (isOffline) {
+                            "App is offline. Please check your Internet connection."
+                        } else {
+                            "Playback Error: ${error.localizedMessage}"
+                        }
                         _isPlaying.value = false
                     }
 
@@ -775,6 +816,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchDownloadMetadata(url: String) {
         viewModelScope.launch {
+            if (!isConnectedToInternet()) {
+                _downloadState.value = DownloadState.Error("App is offline. Please check your Internet connection.")
+                delay(2000)
+                _downloadState.value = DownloadState.Idle
+                return@launch
+            }
             _downloadState.value = DownloadState.Checking
             PulseLogger.log("Searching download: $url")
             try {
@@ -812,7 +859,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                _downloadState.value = DownloadState.Error("Invalid link")
+                val isOffline = !isConnectedToInternet() ||
+                               (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
+                               e is UnknownHostException ||
+                               e is SocketTimeoutException ||
+                               e is IOException
+
+                val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Invalid link"
+                _downloadState.value = DownloadState.Error(msg)
                 delay(2000)
                 _downloadState.value = DownloadState.Idle
             }
@@ -919,7 +973,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadState.value = DownloadState.Idle
                 } else {
                     PulseLogger.log("Download failed: ${e.localizedMessage}", isError = true)
-                    _downloadState.value = DownloadState.Error("Invalid link")
+                    val isOffline = !isConnectedToInternet() ||
+                                   (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
+                                   e is UnknownHostException ||
+                                   e is SocketTimeoutException ||
+                                   e is IOException
+
+                    val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Invalid link"
+                    _downloadState.value = DownloadState.Error(msg)
                     delay(2000)
                     _downloadState.value = DownloadState.Idle
                 }
