@@ -96,7 +96,7 @@ fun PlaylistDetailScreen(
 
     val repeatMode by viewModel.repeatMode.collectAsState()
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0F))) {
         Scaffold(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) }

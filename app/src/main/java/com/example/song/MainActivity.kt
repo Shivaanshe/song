@@ -7,6 +7,9 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,6 +54,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.decorView.setBackgroundColor(android.graphics.Color.BLACK)
 
         setContent {
             SongTheme {
@@ -119,9 +123,13 @@ fun MainApp(viewModel: SongViewModel) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    FluidMeshBackground(
-        pagerOffset = { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Black
     ) {
+        FluidMeshBackground(
+            pagerOffset = { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+        ) {
         if (isLandscape && showBottomBar) {
             // --- LANDSCAPE ADAPTIVE LAYOUT ---
             Row(
@@ -198,7 +206,11 @@ fun MainApp(viewModel: SongViewModel) {
                     NavHost(
                         navController = navController,
                         startDestination = "main",
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        enterTransition = { fadeIn(animationSpec = tween(300)) },
+                        exitTransition = { fadeOut(animationSpec = tween(300)) },
+                        popEnterTransition = { fadeIn(animationSpec = tween(300)) },
+                        popExitTransition = { fadeOut(animationSpec = tween(300)) }
                     ) {
                         composable("main") {
                             MainPagerContent(
@@ -239,6 +251,7 @@ fun MainApp(viewModel: SongViewModel) {
         // Floating Debug Button on top of everything
         DebugOverlay(viewModel)
     }
+  }
 }
 
 @Composable

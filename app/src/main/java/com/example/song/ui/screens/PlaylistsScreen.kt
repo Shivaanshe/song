@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.song.data.model.Playlist
 
@@ -100,7 +101,8 @@ fun PlaylistRow(playlist: Playlist, onClick: () -> Unit) {
         Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = playlist.name,
-            style = MaterialTheme.typography.titleMedium
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White
         )
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

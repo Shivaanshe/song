@@ -93,8 +93,8 @@ fun SongListItem(
             ),
         color = when {
             isSelected -> Color.White.copy(alpha = 0.4f)
-            isPlaying -> Color.White.copy(alpha = 0.5f)
-            else -> Color.White.copy(alpha = 0.3f)
+            isPlaying -> Color.White.copy(alpha = 0.25f)
+            else -> Color(0xFF121216).copy(alpha = 0.55f)
         },
         shape = RoundedCornerShape(20.dp)
     ) {
@@ -148,14 +148,18 @@ fun SongListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = song.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = song.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.DarkGray
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -163,18 +167,18 @@ fun SongListItem(
                     Icon(
                         imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favorite",
-                        tint = if (song.isFavorite) Color.Red else Color(0xFF424242),
+                        tint = if (song.isFavorite) Color.Red else Color.White.copy(alpha = 0.8f),
                         modifier = Modifier.size(24.dp)
                     )
                 }
                 IconButton(
                     onClick = onPlayClick,
-                    modifier = Modifier.background(Color.White.copy(alpha = 0.5f), CircleShape).size(32.dp)
+                    modifier = Modifier.background(Color.White.copy(alpha = 0.2f), CircleShape).size(32.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = "Play",
-                        tint = Color(0xFF424242),
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
                 }

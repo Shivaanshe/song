@@ -365,7 +365,22 @@ fun PlaylistCard(playlist: Playlist, viewModel: SongViewModel, onClick: () -> Un
             if (coverImage != null) AsyncImage(model = coverImage, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             else Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.White)
         }
-        Spacer(modifier = Modifier.height(8.dp)); Text(text = playlist.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF333333)), maxLines = 1, overflow = TextOverflow.Ellipsis); Text(text = "Playlist", style = MaterialTheme.typography.labelSmall, color = Color(0xFF666666))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "Playlist",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
     if (showDeleteDialog) { AlertDialog(onDismissRequest = { showDeleteDialog = false }, title = { Text("Delete Playlist") }, text = { Text("Are you sure you want to delete '${playlist.name}'?") }, confirmButton = { TextButton(onClick = { viewModel.deletePlaylist(playlist.id); showDeleteDialog = false }) { Text("Delete", color = Color.Red) } }, dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } }) }
 }
@@ -374,6 +389,21 @@ fun PlaylistCard(playlist: Playlist, viewModel: SongViewModel, onClick: () -> Un
 fun FavoritesCollectionCard(count: Int, onClick: () -> Unit) {
     Column(modifier = Modifier.width(120.dp).clickable { onClick() }, horizontalAlignment = Alignment.Start) {
         Box(modifier = Modifier.size(120.dp).shadow(12.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.8f), Color(0xFFE040FB).copy(alpha = 0.8f)))).border(1.5.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(24.dp))) { Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.align(Alignment.Center).size(48.dp), tint = Color.White) }
-        Spacer(modifier = Modifier.height(8.dp)); Text(text = "Favorites", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF333333)), maxLines = 1); Text(text = "$count songs", style = MaterialTheme.typography.labelSmall, color = Color(0xFF666666))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Favorites",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "$count songs",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

@@ -420,7 +420,7 @@ fun StreamingItemCard(item: StreamingItem, enabled: Boolean = true, isResolving:
     val infiniteTransition = rememberInfiniteTransition(label = "PulseTransition")
     val pulseScale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 1.02f, animationSpec = infiniteRepeatable(animation = tween(1200, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse), label = "PulseScale")
     val scale by animateFloatAsState(targetValue = if (isDragging) 1.05f else if (isSelected) 0.95f else if (isPlaying) pulseScale else 1f, animationSpec = if (isDragging || isSelected || isPlaying) spring(dampingRatio = Spring.DampingRatioMediumBouncy) else tween(300), label = "SelectionScale")
-    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).graphicsLayer { scaleX = scale; scaleY = scale; if (isDragging) shadowElevation = 16.dp.toPx() }.combinedClickable(enabled = enabled && !isResolving && !isArrangeMode, onClick = onClick, onLongClick = onLongClick).border(width = if (isDragging) 3.dp else if (isSelected || isPlaying) 2.dp else 1.5.dp, brush = when { isDragging -> Brush.linearGradient(colors = listOf(Color(0xFFFF4081), Color(0xFFFF4081))); isSelected -> Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))); isPlaying -> Brush.linearGradient(colors = listOf(Color(0xFF00E676), Color(0xFF1DE9B6))); else -> Brush.linearGradient(colors = listOf(Color.White.copy(alpha = 0.3f), Color.White.copy(alpha = 0.3f))) }, shape = RoundedCornerShape(20.dp)), color = when { isSelected -> Color.White.copy(alpha = 0.4f); isPlaying -> Color.White.copy(alpha = 0.5f); else -> Color.White.copy(alpha = 0.3f) }, shape = RoundedCornerShape(20.dp)) {
+    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).graphicsLayer { scaleX = scale; scaleY = scale; if (isDragging) shadowElevation = 16.dp.toPx() }.combinedClickable(enabled = enabled && !isResolving && !isArrangeMode, onClick = onClick, onLongClick = onLongClick).border(width = if (isDragging) 3.dp else if (isSelected || isPlaying) 2.dp else 0.dp, brush = when { isDragging -> Brush.linearGradient(colors = listOf(Color(0xFFFF4081), Color(0xFFFF4081))); isSelected -> Brush.linearGradient(colors = listOf(Color(0xFFE040FB), Color(0xFFFF4081))); isPlaying -> Brush.linearGradient(colors = listOf(Color(0xFF00E676), Color(0xFF1DE9B6))); else -> Brush.linearGradient(colors = listOf(Color.Transparent, Color.Transparent)) }, shape = RoundedCornerShape(20.dp)), color = when { isSelected -> Color.White.copy(alpha = 0.4f); isPlaying -> Color.White.copy(alpha = 0.25f); else -> Color(0xFF121216).copy(alpha = 0.55f) }, shape = RoundedCornerShape(20.dp)) {
         Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (isArrangeMode) Icon(imageVector = Icons.Default.DragIndicator, contentDescription = "Reorder", tint = Color(0xFF424242).copy(alpha = 0.6f), modifier = Modifier.padding(end = 12.dp).size(24.dp))
             Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(Color.Gray.copy(alpha = 0.2f))) {
@@ -431,12 +431,12 @@ fun StreamingItemCard(item: StreamingItem, enabled: Boolean = true, isResolving:
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = item.title, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(text = item.artist ?: if (item.isPlaylist) "YouTube Playlist" else "YouTube Stream", style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF666666)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = item.title, style = MaterialTheme.typography.bodyLarge, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(text = item.artist ?: if (item.isPlaylist) "YouTube Playlist" else "YouTube Stream", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.72f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isResolving) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = Color(0xFFE91E63))
-                else { IconButton(onClick = onFavoriteToggle, modifier = Modifier.size(32.dp)) { Icon(imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = "Favorite", tint = if (item.isFavorite) Color.Red else Color(0xFF424242), modifier = Modifier.size(20.dp)) }; Spacer(modifier = Modifier.width(8.dp)); IconButton(onClick = onClick, modifier = Modifier.background(Color.White.copy(alpha = 0.5f), CircleShape).size(32.dp), enabled = enabled) { Icon(imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = if (isPlaying) "Pause" else "Play", tint = Color(0xFF424242), modifier = Modifier.size(20.dp)) } }
+                else { IconButton(onClick = onFavoriteToggle, modifier = Modifier.size(32.dp)) { Icon(imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = "Favorite", tint = if (item.isFavorite) Color.Red else Color.White.copy(alpha = 0.8f), modifier = Modifier.size(20.dp)) }; Spacer(modifier = Modifier.width(8.dp)); IconButton(onClick = onClick, modifier = Modifier.background(Color.White.copy(alpha = 0.2f), CircleShape).size(32.dp), enabled = enabled) { Icon(imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = if (isPlaying) "Pause" else "Play", tint = Color.White, modifier = Modifier.size(20.dp)) } }
             }
         }
     }
@@ -454,6 +454,21 @@ fun StreamingPlaylistCard(item: StreamingItem, isSelected: Boolean = false, sele
             Box(modifier = Modifier.fillMaxSize().padding(8.dp), contentAlignment = Alignment.BottomEnd) { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, contentDescription = null, modifier = Modifier.size(24.dp), tint = Color.White) }
             androidx.compose.animation.AnimatedVisibility(visible = isSelected, enter = fadeIn() + scaleIn(), exit = fadeOut() + scaleOut()) { Box(modifier = Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp).shadow(8.dp, CircleShape)) } }
         }
-        Spacer(modifier = Modifier.height(8.dp)); Text(text = item.title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF424242)), maxLines = 1, overflow = TextOverflow.Ellipsis); Text(text = "YouTube Playlist", style = MaterialTheme.typography.labelSmall, color = Color(0xFF666666))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = "YouTube Playlist",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
