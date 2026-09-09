@@ -6,13 +6,16 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
@@ -25,11 +28,18 @@ import com.example.song.util.SpotifyResolver
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: SongRepository = SongRepository(
@@ -658,15 +668,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         PulseLogger.log("Playing local song: ${song.title}")
         
         val index = queue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
-        val ids = ArrayList(queue.map { it.id })
+        val ids = queue.mapTo(ArrayList()) { it.id }
         
         mediaController?.let { controller ->
-            val args = android.os.Bundle().apply {
+            val args = Bundle().apply {
                 putIntegerArrayList("ids", ids)
                 putInt("index", index)
                 putBoolean("isStreaming", false)
             }
-            controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
+            controller.sendCustomCommand(SessionCommand("PLAY_QUEUE", Bundle.EMPTY), args)
         }
     }
 
@@ -698,7 +708,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun playStreamingItem(item: StreamingItem, queue: List<StreamingItem>) {
         val filteredQueue = queue.filter { !it.isPlaylist }
         val index = filteredQueue.indexOfFirst { it.id == item.id }.coerceAtLeast(0)
-        val ids = ArrayList(filteredQueue.map { 1_000_000 + it.id })
+        val ids = filteredQueue.mapTo(ArrayList()) { 1_000_000 + it.id }
         PulseLogger.log("Playing streaming item: ${item.title}")
         
         _currentQueue.value = filteredQueue.map {
@@ -713,12 +723,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         mediaController?.let { controller ->
-            val args = android.os.Bundle().apply {
+            val args = Bundle().apply {
                 putIntegerArrayList("ids", ids)
                 putInt("index", index)
                 putBoolean("isStreaming", true)
             }
-            controller.sendCustomCommand(androidx.media3.session.SessionCommand("PLAY_QUEUE", android.os.Bundle.EMPTY), args)
+            controller.sendCustomCommand(SessionCommand("PLAY_QUEUE", Bundle.EMPTY), args)
         }
     }
 
@@ -729,7 +739,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 Log.d("PulseDebug", "seekToNext rejected. Triggering skip-override.")
                 PulseLogger.log("Manual skip: Next")
-                controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_NEXT", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+                controller.sendCustomCommand(SessionCommand("SKIP_TO_NEXT", Bundle.EMPTY), Bundle.EMPTY)
             }
         }
     }
@@ -741,7 +751,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 Log.d("PulseDebug", "seekToPrevious rejected. Triggering skip-override.")
                 PulseLogger.log("Manual skip: Previous")
-                controller.sendCustomCommand(androidx.media3.session.SessionCommand("SKIP_TO_PREVIOUS", android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+                controller.sendCustomCommand(SessionCommand("SKIP_TO_PREVIOUS", Bundle.EMPTY), Bundle.EMPTY)
             }
         }
     }
@@ -927,7 +937,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
-        android.util.Log.d("SongViewModel", "togglePlayPause triggered. isPlaying: ${mediaController?.isPlaying}, state: ${mediaController?.playbackState}")
+        Log.d("SongViewModel", "togglePlayPause triggered. isPlaying: ${mediaController?.isPlaying}, state: ${mediaController?.playbackState}")
         _playbackError.value = null
         mediaController?.let {
             when {
@@ -961,13 +971,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 }
 
 sealed class DownloadState {
-    object Idle : DownloadState()
-    object Checking : DownloadState()
+    data object Idle : DownloadState()
+    data object Checking : DownloadState()
     data class Downloading(
         val progress: Float,
         val current: Int = 1,
         val total: Int = 1
     ) : DownloadState()
-    object Success : DownloadState()
+    data object Success : DownloadState()
     data class Error(val message: String) : DownloadState()
 }
