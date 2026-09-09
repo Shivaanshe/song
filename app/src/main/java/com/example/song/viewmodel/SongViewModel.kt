@@ -765,7 +765,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fetchDownloadMetadata(url: String) {
         viewModelScope.launch {
-            _isExtracting.value = true
+            _downloadState.value = DownloadState.Checking
             PulseLogger.log("Searching download: $url")
             try {
                 val sanitizedUrl = if (url.contains("youtube.com") && url.contains("list=")) {
@@ -780,11 +780,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 if (items.isEmpty()) {
-                    if (url.contains("spotify.com")) {
-                         _downloadState.value = DownloadState.Error("Could not find this track on YouTube")
-                         delay(3000)
-                         _downloadState.value = DownloadState.Idle
-                    }
+                    _downloadState.value = DownloadState.Error("Invalid link")
+                    delay(2000)
+                    _downloadState.value = DownloadState.Idle
                     return@launch
                 }
 
@@ -800,11 +798,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } else {
                     _pendingDownloadItems.value = items
+                    _downloadState.value = DownloadState.Idle
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-            } finally {
-                _isExtracting.value = false
+                _downloadState.value = DownloadState.Error("Invalid link")
+                delay(2000)
+                _downloadState.value = DownloadState.Idle
             }
         }
     }
@@ -820,7 +820,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } catch (e: Exception) {
                     _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
-                    delay(3000)
+                    delay(2000)
                     _downloadState.value = DownloadState.Idle
                     return@launch
                 }
@@ -858,7 +858,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             _downloadState.value = DownloadState.Success
-            delay(3000)
+            delay(1000)
             _downloadState.value = DownloadState.Idle
         }
     }
@@ -876,14 +876,14 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
             if (!isReadyFlow.value) {
-                _downloadState.value = DownloadState.Downloading(0f)
+                _downloadState.value = DownloadState.Checking
                 try {
                     withTimeout(15000) {
                         isReadyFlow.first { it }
                     }
                 } catch (e: Exception) {
-                    _downloadState.value = DownloadState.Error("Music engine failed to initialize. Please restart.")
-                    delay(3000)
+                    _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
+                    delay(2000)
                     _downloadState.value = DownloadState.Idle
                     return@launch
                 }
@@ -891,6 +891,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 PulseLogger.log("Starting download: $overrideTitle")
+                _downloadState.value = DownloadState.Downloading(0f)
                 repository.downloadYouTubeAudio(
                     url = url,
                     overrideTitle = overrideTitle,
@@ -901,15 +902,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _downloadState.value = DownloadState.Success
                 PulseLogger.log("Download finished: $overrideTitle")
-                delay(3000)
+                delay(1000)
                 _downloadState.value = DownloadState.Idle
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException || e.message == "Download cancelled") {
                     _downloadState.value = DownloadState.Idle
                 } else {
                     PulseLogger.log("Download failed: ${e.localizedMessage}", isError = true)
-                    _downloadState.value = DownloadState.Error(e.message ?: "Unknown error")
-                    delay(3000)
+                    _downloadState.value = DownloadState.Error("Invalid link")
+                    delay(2000)
                     _downloadState.value = DownloadState.Idle
                 }
             }
@@ -961,6 +962,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
 sealed class DownloadState {
     object Idle : DownloadState()
+    object Checking : DownloadState()
     data class Downloading(
         val progress: Float,
         val current: Int = 1,

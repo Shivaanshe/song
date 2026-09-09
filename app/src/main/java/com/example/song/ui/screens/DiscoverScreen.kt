@@ -397,14 +397,74 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
         if (selectedPlaylist != null && !isSelectionMode) FloatingActionButton(onClick = { showAddSongDialog = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp).padding(bottom = 80.dp), containerColor = Color.White.copy(alpha = 0.8f), contentColor = Color(0xFFE91E63), shape = CircleShape) { Icon(Icons.Default.Add, contentDescription = "Add Song to Collection") }
         if (showAddSongDialog) {
             androidx.compose.ui.window.Dialog(onDismissRequest = { showAddSongDialog = false }) {
-                Surface(modifier = Modifier.fillMaxWidth(0.9f).height(550.dp).clip(RoundedCornerShape(32.dp)).background(Color.White.copy(alpha = 0.4f)).border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)), color = Color.Transparent) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.9f).height(550.dp),
+                    shape = RoundedCornerShape(32.dp),
+                    color = Color(0xFF121216).copy(alpha = 0.95f),
+                    border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.2f)),
+                    shadowElevation = 16.dp
+                ) {
                     Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-                        Column { Text(text = "Add to Collection", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, color = Color(0xFF333333), fontSize = 26.sp), modifier = Modifier.padding(bottom = 20.dp))
-                            Surface(modifier = Modifier.weight(1f).fillMaxWidth().border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp)), color = Color.White.copy(alpha = 0.2f), shape = RoundedCornerShape(20.dp)) {
+                        Column { 
+                            Text(
+                                text = "Add to Collection", 
+                                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold, color = Color.White, fontSize = 26.sp), 
+                                modifier = Modifier.padding(bottom = 20.dp)
+                            )
+                            Surface(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                color = Color.White.copy(alpha = 0.05f),
+                                shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                            ) {
                                 LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
-                                    items(allStreamingSongs) { item -> Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { viewModel.addStreamingItemToPlaylist(item.id, selectedPlaylist?.youtubeUrl); showAddSongDialog = false }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) { AsyncImage(model = item.thumbnailUrl, contentDescription = null, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.05f)), contentScale = ContentScale.Crop); Spacer(modifier = Modifier.width(16.dp)); Column { Text(text = item.title, style = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF424242), fontSize = 18.sp, fontWeight = FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis); Text(text = item.artist ?: "YouTube Stream", style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF666666), fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis) } } } }
+                                    items(allStreamingSongs) { item -> 
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { 
+                                                    viewModel.addStreamingItemToPlaylist(item.id, selectedPlaylist?.youtubeUrl)
+                                                    showAddSongDialog = false 
+                                                }
+                                                .padding(10.dp), 
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) { 
+                                            AsyncImage(
+                                                model = item.thumbnailUrl, 
+                                                contentDescription = null, 
+                                                modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.2f)), 
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            Spacer(modifier = Modifier.width(16.dp))
+                                            Column { 
+                                                Text(
+                                                    text = item.title, 
+                                                    style = MaterialTheme.typography.bodyLarge.copy(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold), 
+                                                    maxLines = 1, 
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = item.artist ?: "YouTube Stream", 
+                                                    style = MaterialTheme.typography.bodySmall.copy(color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp), 
+                                                    maxLines = 1, 
+                                                    overflow = TextOverflow.Ellipsis
+                                                ) 
+                                            } 
+                                        } 
+                                    } 
+                                }
                             }
-                            Spacer(modifier = Modifier.height(16.dp)); TextButton(onClick = { showAddSongDialog = false }, modifier = Modifier.align(Alignment.End)) { Text("Close", style = MaterialTheme.typography.labelLarge.copy(color = Color(0xFFE91E63), fontWeight = FontWeight.Bold, fontSize = 18.sp)) }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            TextButton(
+                                onClick = { showAddSongDialog = false }, 
+                                modifier = Modifier.align(Alignment.End)
+                            ) { 
+                                Text(
+                                    "Close", 
+                                    style = MaterialTheme.typography.labelLarge.copy(color = Color(0xFF00E676), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                ) 
+                            }
                         }
                     }
                 }

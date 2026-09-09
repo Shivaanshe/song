@@ -148,12 +148,91 @@ fun LibraryScreen(
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
-                if (isExtracting || downloadState is DownloadState.Downloading) {
-                    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.8f), shadowElevation = 8.dp, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = Color(0xFFE91E63), trackColor = Color.Black.copy(alpha = 0.05f))
-                            val progressText = if (isExtracting) "Checking link..." else { val state = downloadState as DownloadState.Downloading; if (state.total > 1) "Batch Download: ${state.current} of ${state.total} (${state.progress.toInt()}%)" else "Downloading... ${state.progress.toInt()}%" }
-                            Text(text = progressText, modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = Color(0xFFE91E63))
+                AnimatedVisibility(
+                    visible = downloadState !is DownloadState.Idle,
+                    enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF121216).copy(alpha = 0.85f),
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            AnimatedContent(
+                                targetState = downloadState,
+                                transitionSpec = { fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(200)) },
+                                label = "DownloadContent"
+                            ) { state ->
+                                Column {
+                                    when (state) {
+                                        is DownloadState.Checking -> {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = Color(0xFFE91E63),
+                                                trackColor = Color.White.copy(alpha = 0.1f)
+                                            )
+                                            Text(
+                                                text = "Checking link...",
+                                                modifier = Modifier.padding(top = 8.dp),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color.White
+                                            )
+                                        }
+                                        is DownloadState.Downloading -> {
+                                            val progressFraction = state.progress / 100f
+                                            LinearProgressIndicator(
+                                                progress = { progressFraction },
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = Color(0xFFE91E63),
+                                                trackColor = Color.White.copy(alpha = 0.1f)
+                                            )
+                                            val progressText = if (state.total > 1) {
+                                                "Batch Download: ${state.current} of ${state.total} (${state.progress.toInt()}%)"
+                                            } else {
+                                                "Downloading... ${state.progress.toInt()}%"
+                                            }
+                                            Text(
+                                                text = progressText,
+                                                modifier = Modifier.padding(top = 8.dp),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color.White
+                                            )
+                                        }
+                                        is DownloadState.Success -> {
+                                            LinearProgressIndicator(
+                                                progress = { 1f },
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = Color(0xFF00E676),
+                                                trackColor = Color.White.copy(alpha = 0.1f)
+                                            )
+                                            Text(
+                                                text = "Download Complete",
+                                                modifier = Modifier.padding(top = 8.dp),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color(0xFF00E676)
+                                            )
+                                        }
+                                        is DownloadState.Error -> {
+                                            LinearProgressIndicator(
+                                                progress = { 0f },
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = Color(0xFFF44336),
+                                                trackColor = Color.White.copy(alpha = 0.1f)
+                                            )
+                                            Text(
+                                                text = state.message,
+                                                modifier = Modifier.padding(top = 8.dp),
+                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color(0xFFF44336)
+                                            )
+                                        }
+                                        is DownloadState.Idle -> {}
+                                    }
+                                }
+                            }
                         }
                     }
                 }
