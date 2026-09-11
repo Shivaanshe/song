@@ -2,10 +2,15 @@ package com.example.song.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import com.example.song.ui.components.OnlineSearchResultCard
+import com.example.song.viewmodel.ItemActionState
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -73,6 +78,7 @@ fun LibraryScreen(
     val isExtracting by viewModel.isExtracting.collectAsState()
     val pendingDownloadItems by viewModel.pendingDownloadItems.collectAsState()
     val isEngineReady by SongApplication.getInstance().isReady.collectAsState()
+
     var isSearching by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -88,6 +94,10 @@ fun LibraryScreen(
 
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedSongIds by viewModel.selectedSongIds.collectAsState()
+
+    val onlineSearchResults by viewModel.onlineSearchResults.collectAsState()
+    val isOnlineSearching by viewModel.isOnlineSearching.collectAsState()
+    val itemActionStates by viewModel.itemActionStates.collectAsState()
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -123,7 +133,18 @@ fun LibraryScreen(
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                     title = {
                         if (isSearching) {
-                            TextField(value = searchQuery, onValueChange = { viewModel.setSearchQuery(it) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), placeholder = { Text("Search songs...") }, singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.2f), unfocusedContainerColor = Color.White.copy(alpha = 0.1f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), shape = RoundedCornerShape(24.dp), trailingIcon = { IconButton(onClick = { isSearching = false; viewModel.setSearchQuery("") }) { Icon(Icons.Default.Close, contentDescription = "Close search") } })
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                placeholder = { Text("Search songs...") },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.2f), unfocusedContainerColor = Color.White.copy(alpha = 0.1f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+                                shape = RoundedCornerShape(24.dp),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { if (searchQuery.isNotBlank()) viewModel.searchOnline(searchQuery, isLibrary = true) }),
+                                trailingIcon = { IconButton(onClick = { isSearching = false; viewModel.setSearchQuery(""); viewModel.clearOnlineSearchResults() }) { Icon(Icons.Default.Close, contentDescription = "Close search") } }
+                            )
                         } else {
                             Text(
                                 if (isArrangeModeEnabled) "Arrange Songs" else "My Library", 
@@ -147,7 +168,7 @@ fun LibraryScreen(
                 )
             }
         ) { padding ->
-            Column(modifier = Modifier.padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
                 AnimatedVisibility(
                     visible = downloadState !is DownloadState.Idle,
                     enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -237,7 +258,7 @@ fun LibraryScreen(
                     }
                 }
 
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
+                LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
                     onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, localSongs.map { it.id }) },
                     onSelectUpdate = { key -> if (key is Int) viewModel.updateRangeSelection(key, localSongs.map { it.id }) },
                     onSelectEnd = { viewModel.endRangeSelection() },
@@ -356,17 +377,56 @@ fun LibraryScreen(
                                 }
                             }
                         }
-                        item { Text("Library Tracks", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)) }
-                    }
-                    itemsIndexed(localSongs, key = { _, song -> song.id }) { index, song ->
-                        val isDragging = draggedItemIndex == index
-                        val itemHeightPx = measuredItemHeightPx
-                        val targetDisplacement = when { isDragging -> 0f; draggedItemIndex == null || targetIndex == null || itemHeightPx == 0f -> 0f; draggedItemIndex!! < targetIndex!! && index > draggedItemIndex!! && index <= targetIndex!! -> -itemHeightPx; draggedItemIndex!! > targetIndex!! && index < draggedItemIndex!! && index >= targetIndex!! -> itemHeightPx; else -> 0f }
-                        val itemTranslationY by animateFloatAsState(targetValue = targetDisplacement, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "DragTranslation")
-                        val isGhostSlot = !isDragging && targetIndex == index
-                        Box(modifier = Modifier.fillMaxWidth().animateItem().zIndex(if (isGhostSlot) 1f else 0f).onGloballyPositioned { if (measuredItemHeightPx == 0f) measuredItemHeightPx = it.size.height.toFloat() }.graphicsLayer { translationY = itemTranslationY }) {
-                            if (isGhostSlot) { Box(modifier = Modifier.fillMaxWidth().height(with(LocalDensity.current) { measuredItemHeightPx.toDp() }).graphicsLayer { translationY = -itemTranslationY }.padding(horizontal = 24.dp, vertical = 8.dp).border(width = 2.dp, brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.5f), Color(0xFFFF4081).copy(alpha = 0.2f))), shape = RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Text("DROP SONG HERE", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold, color = Color(0xFFFF4081).copy(alpha = 0.6f), letterSpacing = 2.sp)) } }
-                            Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) { SongListItem(song = song, onPlayClick = { if (isSelectionMode) viewModel.toggleSongSelection(song.id) else { viewModel.playSong(song, localSongs); onSongClick() } }, onFavoriteToggle = { viewModel.updateFavorite(song, !song.isFavorite) }, onDelete = { viewModel.deleteSong(song.id) }, isSelected = selectedSongIds.contains(song.id), onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleSongSelection(song.id) }, selectionMode = isSelectionMode, isPlaying = currentSong?.id == song.id, isArrangeMode = isArrangeModeEnabled, isDragging = false) }
+                        if (isSearching && searchQuery.isNotBlank() && songs.isEmpty()) {
+                            item {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 60.dp).padding(horizontal = 24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (isOnlineSearching) {
+                                        CircularProgressIndicator(color = Color(0xFF00E676))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text("Searching YouTube (<10 mins)...", color = Color.White.copy(alpha = 0.72f))
+                                    } else if (onlineSearchResults.isEmpty()) {
+                                        Text("No local tracks found.", color = Color.White.copy(alpha = 0.72f))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Button(
+                                            onClick = { viewModel.searchOnline(searchQuery, isLibrary = true) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                                        ) {
+                                            Text("Search & Download Offline (<10m)", fontWeight = FontWeight.Bold, color = Color.Black)
+                                        }
+                                    }
+                                }
+                            }
+                            if (onlineSearchResults.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        "Online Download Results (<10 mins)",
+                                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                    )
+                                }
+                                items(onlineSearchResults, key = { it.youtubeUrl }) { item ->
+                                    OnlineSearchResultCard(
+                                        item = item,
+                                        onAddClick = { viewModel.ingestOnlineItem(item, isLibrary = true) }
+                                    )
+                                }
+                            }
+                        } else {
+                            item { Text("Library Tracks", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)) }
+                            itemsIndexed(localSongs, key = { _, song -> song.id }) { index, song ->
+                                val isDragging = draggedItemIndex == index
+                                val itemHeightPx = measuredItemHeightPx
+                                val targetDisplacement = when { isDragging -> 0f; draggedItemIndex == null || targetIndex == null || itemHeightPx == 0f -> 0f; draggedItemIndex!! < targetIndex!! && index > draggedItemIndex!! && index <= targetIndex!! -> -itemHeightPx; draggedItemIndex!! > targetIndex!! && index < draggedItemIndex!! && index >= targetIndex!! -> itemHeightPx; else -> 0f }
+                                val itemTranslationY by animateFloatAsState(targetValue = targetDisplacement, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "DragTranslation")
+                                val isGhostSlot = !isDragging && targetIndex == index
+                                Box(modifier = Modifier.fillMaxWidth().animateItem().zIndex(if (isGhostSlot) 1f else 0f).onGloballyPositioned { if (measuredItemHeightPx == 0f) measuredItemHeightPx = it.size.height.toFloat() }.graphicsLayer { translationY = itemTranslationY }) {
+                                    if (isGhostSlot) { Box(modifier = Modifier.fillMaxWidth().height(with(LocalDensity.current) { measuredItemHeightPx.toDp() }).graphicsLayer { translationY = -itemTranslationY }.padding(horizontal = 24.dp, vertical = 8.dp).border(width = 2.dp, brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.5f), Color(0xFFFF4081).copy(alpha = 0.2f))), shape = RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Text("DROP SONG HERE", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold, color = Color(0xFFFF4081).copy(alpha = 0.6f), letterSpacing = 2.sp)) } }
+                                    Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) { SongListItem(song = song, onPlayClick = { if (isSelectionMode) viewModel.toggleSongSelection(song.id) else { viewModel.playSong(song, localSongs); onSongClick() } }, onFavoriteToggle = { viewModel.updateFavorite(song, !song.isFavorite) }, onDelete = { viewModel.deleteSong(song.id) }, isSelected = selectedSongIds.contains(song.id), onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleSongSelection(song.id) }, selectionMode = isSelectionMode, isPlaying = currentSong?.id == song.id, isArrangeMode = isArrangeModeEnabled, isDragging = false) }
+                                }
+                            }
                         }
                     }
                 }

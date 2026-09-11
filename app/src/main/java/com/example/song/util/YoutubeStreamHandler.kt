@@ -210,4 +210,40 @@ object YoutubeStreamHandler {
         }
         return@withContext null
     }
+
+    suspend fun searchYouTube(query: String, maxResults: Int = 5, maxDurationSeconds: Int? = null): List<StreamingItem> = withContext(Dispatchers.IO) {
+        try {
+            val cleanQuery = query.trim()
+            if (cleanQuery.isEmpty()) return@withContext emptyList()
+
+            val searchQuery = "ytsearch$maxResults:$cleanQuery"
+            val request = YoutubeDLRequest(searchQuery).apply {
+                addOption("--dump-json")
+                addOption("--flat-playlist")
+                addOption("--no-playlist")
+                addOption("--no-check-certificate")
+                addOption("--socket-timeout", "15")
+                addOption("--extractor-args", "youtube:player_client=android,mweb")
+                if (maxDurationSeconds != null) {
+                    addOption("--match-filter", "duration < $maxDurationSeconds")
+                }
+            }
+
+            val response = YoutubeDL.getInstance().execute(request, UUID.randomUUID().toString())
+            val output = response.out
+            val items = mutableListOf<StreamingItem>()
+
+            output.lineSequence().filter { it.isNotBlank() }.forEach { line ->
+                try {
+                    val json = JSONObject(line)
+                    parseJsonToStreamingItem(json, null)?.let { items.add(it) }
+                } catch (_: Exception) {}
+            }
+
+            return@withContext items
+        } catch (e: Exception) {
+            Log.e(TAG, "Search failed: ${e.localizedMessage}", e)
+            return@withContext emptyList()
+        }
+    }
 }

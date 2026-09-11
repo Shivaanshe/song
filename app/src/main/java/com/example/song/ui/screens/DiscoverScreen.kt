@@ -2,7 +2,12 @@ package com.example.song.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import com.example.song.ui.components.OnlineSearchResultCard
+import com.example.song.viewmodel.ItemActionState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -78,6 +83,11 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
     BackHandler(enabled = selectedPlaylist != null) {
         selectedPlaylist = null
     }
+
+    val onlineSearchResults by viewModel.onlineSearchResults.collectAsState()
+    val isOnlineSearching by viewModel.isOnlineSearching.collectAsState()
+    val itemActionStates by viewModel.itemActionStates.collectAsState()
+
     var showAddSongDialog by remember { mutableStateOf(false) }
     val allStreamingSongs by viewModel.allStreamingSongs.collectAsState()
     val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
@@ -126,7 +136,18 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                     CenterAlignedTopAppBar(colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                         title = { 
                             if (isSearching) { 
-                                TextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), placeholder = { Text("Search streaming...") }, singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.2f), unfocusedContainerColor = Color.White.copy(alpha = 0.1f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), shape = RoundedCornerShape(24.dp), trailingIcon = { IconButton(onClick = { isSearching = false; searchQuery = "" }) { Icon(Icons.Default.Close, contentDescription = "Close search") } }) 
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                    placeholder = { Text("Search streaming...") },
+                                    singleLine = true,
+                                    colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.2f), unfocusedContainerColor = Color.White.copy(alpha = 0.1f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+                                    shape = RoundedCornerShape(24.dp),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = { if (searchQuery.isNotBlank()) viewModel.searchOnline(searchQuery, isLibrary = false) }),
+                                    trailingIcon = { IconButton(onClick = { isSearching = false; searchQuery = ""; viewModel.clearOnlineSearchResults() }) { Icon(Icons.Default.Close, contentDescription = "Close search") } }
+                                ) 
                             } else { 
                                 Text(
                                     if (isArrangeModeEnabled) "Arrange Songs" else "Discover", 
@@ -160,7 +181,7 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                     var localSingleSongs by remember { mutableStateOf(emptyList<StreamingItem>()) }
                     LaunchedEffect(singleSongs, draggedItemIndex, isManualOrder) { if (draggedItemIndex == null && !isManualOrder) localSingleSongs = singleSongs }
 
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
+                    LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
                         onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, localSingleSongs.map { it.id }, isStreaming = true) },
                         onSelectUpdate = { key -> if (key is Int) viewModel.updateRangeSelection(key, localSingleSongs.map { it.id }, isStreaming = true) },
                         onSelectEnd = { viewModel.endRangeSelection() },
@@ -309,13 +330,54 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                                     Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) { StreamingItemCard(item = item, enabled = isEngineReady, isResolving = resolvingUrlId == item.id, isPlaying = isPlaying && isCurrentItemPlaying, isArrangeMode = isArrangeModeEnabled, isDragging = false, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(item.id) else if (isEngineReady) { if (isCurrentItemPlaying) viewModel.togglePlayPause() else { viewModel.playStreamingItem(item, localSingleSongs); onSongClick() } } }, onFavoriteToggle = { viewModel.toggleStreamingFavorite(item) }, onDelete = { viewModel.deleteStreamingItem(item) }, isSelected = selectedStreamingIds.contains(item.id), onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(item.id) }, selectionMode = isSelectionMode) }
                                 }
                             }
-                        } else if (playlists.isEmpty() && !isExtracting) { item { Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) { Text("No items found", color = Color.Gray) } } }
+                        } else if (playlists.isEmpty() && singleSongs.isEmpty() && !isExtracting) {
+                            if (isSearching && searchQuery.isNotBlank()) {
+                                item {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 60.dp).padding(horizontal = 24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        if (isOnlineSearching) {
+                                            CircularProgressIndicator(color = Color(0xFFE91E63))
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Text("Searching YouTube...", color = Color.White.copy(alpha = 0.72f))
+                                        } else if (onlineSearchResults.isEmpty()) {
+                                            Text("No local results found.", color = Color.White.copy(alpha = 0.72f))
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Button(
+                                                onClick = { viewModel.searchOnline(searchQuery, isLibrary = false) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+                                            ) {
+                                                Text("Search Online on YouTube", fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                                if (onlineSearchResults.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            "Online Search Results",
+                                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                        )
+                                    }
+                                    items(onlineSearchResults, key = { it.youtubeUrl }) { item ->
+                                        OnlineSearchResultCard(
+                                            item = item,
+                                            onAddClick = { viewModel.ingestOnlineItem(item, isLibrary = false) }
+                                        )
+                                    }
+                                }
+                            } else {
+                                item { Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) { Text("No items added yet", color = Color.White.copy(alpha = 0.5f)) } }
+                            }
+                        }
                     }
                 } else {
                     val playlistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist!!.youtubeUrl).collectAsState(initial = emptyList())
                     var localPlaylistItems by remember { mutableStateOf(emptyList<StreamingItem>()) }
                     LaunchedEffect(playlistItems, draggedItemIndex, isManualOrder) { if (draggedItemIndex == null && !isManualOrder) localPlaylistItems = playlistItems.filter { !it.isPlaylist } }
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
+                    LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
                         onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, localPlaylistItems.map { it.id }, isStreaming = true) },
                         onSelectUpdate = { key -> if (key is Int) viewModel.updateRangeSelection(key, localPlaylistItems.map { it.id }, isStreaming = true) },
                         onSelectEnd = { viewModel.endRangeSelection() },

@@ -44,6 +44,10 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
+enum class ItemActionState {
+    Idle, Loading, Success
+}
+
 @OptIn(UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -119,6 +123,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _playbackError = MutableStateFlow<String?>(null)
     val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
+    private val _onlineSearchResults = MutableStateFlow<List<StreamingItem>>(emptyList())
+    val onlineSearchResults: StateFlow<List<StreamingItem>> = _onlineSearchResults.asStateFlow()
+
+    private val _isOnlineSearching = MutableStateFlow(false)
+    val isOnlineSearching: StateFlow<Boolean> = _isOnlineSearching.asStateFlow()
+
+    private val _itemActionStates = MutableStateFlow<Map<String, ItemActionState>>(emptyMap())
+    val itemActionStates: StateFlow<Map<String, ItemActionState>> = _itemActionStates.asStateFlow()
 
     val systemLogs: StateFlow<List<String>> = PulseLogger.logs
     val currentTask: StateFlow<String?> = PulseLogger.currentTask
@@ -991,6 +1004,64 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelDownload() {
         repository.cancelDownload()
         _downloadState.value = DownloadState.Idle
+    }
+
+    fun clearOnlineSearchResults() {
+        _onlineSearchResults.value = emptyList()
+        _isOnlineSearching.value = false
+    }
+
+    fun searchOnline(query: String, isLibrary: Boolean) {
+        viewModelScope.launch {
+            if (!isConnectedToInternet()) {
+                _playbackError.value = "App is offline. Please check your Internet connection."
+                return@launch
+            }
+            _isOnlineSearching.value = true
+            _onlineSearchResults.value = emptyList()
+            try {
+                val maxDuration = if (isLibrary) 600 else null
+                val results = YoutubeStreamHandler.searchYouTube(query, maxResults = 5, maxDurationSeconds = maxDuration)
+                _onlineSearchResults.value = results
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _onlineSearchResults.value = emptyList()
+            } finally {
+                _isOnlineSearching.value = false
+            }
+        }
+    }
+
+    fun ingestOnlineItem(item: StreamingItem, isLibrary: Boolean) {
+        viewModelScope.launch {
+            val key = item.youtubeUrl
+            val currentStates = _itemActionStates.value.toMutableMap()
+            currentStates[key] = ItemActionState.Loading
+            _itemActionStates.value = currentStates
+
+            try {
+                if (isLibrary) {
+                    repository.downloadYouTubeAudio(
+                        url = item.youtubeUrl,
+                        overrideTitle = item.title,
+                        overrideArtist = item.artist,
+                        overrideImageUrl = item.thumbnailUrl
+                    ) { _, _ -> }
+                } else {
+                    repository.insertStreamingItems(listOf(item))
+                }
+                currentStates[key] = ItemActionState.Success
+                _itemActionStates.value = currentStates
+                delay(3000)
+                currentStates.remove(key)
+                _itemActionStates.value = currentStates
+            } catch (e: Exception) {
+                e.printStackTrace()
+                currentStates.remove(key)
+                _itemActionStates.value = currentStates
+                _playbackError.value = "Failed to add item: ${e.localizedMessage}"
+            }
+        }
     }
 
     fun resetDownloadState() {
