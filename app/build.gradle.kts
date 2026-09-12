@@ -62,6 +62,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -102,6 +103,9 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.material.icons.extended)
     
+    // DataStore Preferences
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
 

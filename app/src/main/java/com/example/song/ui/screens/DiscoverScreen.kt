@@ -65,7 +65,11 @@ import androidx.compose.ui.platform.LocalDensity
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
+fun DiscoverScreen(
+    viewModel: SongViewModel,
+    onSongClick: () -> Unit,
+    onSettingsClick: () -> Unit = {}
+) {
     val items by viewModel.topLevelStreamingItems.collectAsState()
     val isExtracting by viewModel.isExtracting.collectAsState()
     val isEngineReady by SongApplication.getInstance().isReady.collectAsState()
@@ -172,7 +176,16 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                                         Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63))
                                     }
                                 } else {
-                                    IconButton(onClick = { if (isEngineReady) showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f), CircleShape), enabled = isEngineReady) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) } 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = onSettingsClick,
+                                            modifier = Modifier.size(40.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                        ) {
+                                            Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings & Updates", tint = Color(0xFF424242))
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        IconButton(onClick = { if (isEngineReady) showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f), CircleShape), enabled = isEngineReady) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) } 
+                                    }
                                 }
                             } 
                         }
