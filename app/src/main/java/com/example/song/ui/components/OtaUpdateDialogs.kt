@@ -217,7 +217,7 @@ fun OtaUpdateAvailableDialog(
                     Button(
                         onClick = {
                             if (!isDownloading) {
-                                viewModel.startDownload()
+                                viewModel.startDownloadOrInstall()
                             }
                         },
                         enabled = !isDownloading

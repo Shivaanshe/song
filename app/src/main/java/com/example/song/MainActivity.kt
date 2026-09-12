@@ -136,6 +136,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        otaViewModel.checkPermissionAndResumeInstall()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {

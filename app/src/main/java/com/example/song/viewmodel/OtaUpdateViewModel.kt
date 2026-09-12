@@ -2,10 +2,15 @@ package com.example.song.viewmodel
 
 import android.app.Application
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Environment
+import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.song.data.api.GitHubAsset
 import com.example.song.data.api.GitHubRelease
@@ -19,7 +24,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
-class OtaUpdateViewModel(application: Application) : AndroidViewModel(application) {
+class OtaUpdateViewModel(
+    application: Application,
+    private val savedStateHandle: SavedStateHandle
+) : AndroidViewModel(application) {
 
     private val TAG = "OtaUpdateViewModel"
     private val otaManager = OtaUpdateManager(application)
@@ -62,6 +70,13 @@ class OtaUpdateViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var progressPollingJob: Job? = null
     private var downloadedFile: File? = null
+
+    // Persisted in SavedStateHandle so it survives process death when user goes to Settings
+    private var isWaitingForInstallPermission: Boolean
+        get() = savedStateHandle.get<Boolean>("KEY_WAITING_INSTALL_PERMISSION") ?: false
+        set(value) {
+            savedStateHandle["KEY_WAITING_INSTALL_PERMISSION"] = value
+        }
 
     /**
      * Called on application start.
@@ -125,9 +140,31 @@ class OtaUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun startDownloadOrInstall() {
+        val release = _activeRelease.value ?: return
+        val asset = _activeAsset.value ?: return
+
+        val existingFile = otaManager.getExistingDownloadedApk(release, asset)
+        if (existingFile != null) {
+            Log.d(TAG, "Found existing downloaded APK (${existingFile.name}). Bypassing download and launching install flow.")
+            downloadedFile = existingFile
+            triggerInstallFlow(existingFile)
+        } else {
+            startDownload()
+        }
+    }
+
     fun startDownload() {
         val release = _activeRelease.value ?: return
         val asset = _activeAsset.value ?: return
+
+        val existingFile = otaManager.getExistingDownloadedApk(release, asset)
+        if (existingFile != null) {
+            Log.d(TAG, "Found existing downloaded APK (${existingFile.name}). Bypassing download and launching install flow.")
+            downloadedFile = existingFile
+            triggerInstallFlow(existingFile)
+            return
+        }
 
         viewModelScope.launch {
             try {
@@ -137,7 +174,7 @@ class OtaUpdateViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start download", e)
                 _isDownloading.value = false
-                _toastMessage.value = "Download failed: ${e.message}"
+                _toastMessage.value = e.message ?: "Download failed"
             }
         }
     }
@@ -204,10 +241,43 @@ class OtaUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun checkPermissionAndResumeInstall() {
+        if (!isWaitingForInstallPermission) return
+        isWaitingForInstallPermission = false
+
+        if (otaManager.canInstallPackages()) {
+            _showPermissionModal.value = false
+            val release = _activeRelease.value
+            val asset = _activeAsset.value
+            val fileToInstall = downloadedFile ?: (if (release != null && asset != null) otaManager.getExistingDownloadedApk(release, asset) else null)
+            if (fileToInstall != null && fileToInstall.exists()) {
+                triggerInstallFlow(fileToInstall)
+            }
+        }
+    }
+
     fun openPermissionSettings(context: Context) {
-        val intent = otaManager.getInstallUnknownAppsIntent()
-        context.startActivity(intent)
+        isWaitingForInstallPermission = true
         _showPermissionModal.value = false
+        try {
+            val intent = otaManager.getInstallUnknownAppsIntent()
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES not supported on this OEM skin. Falling back to application details.", e)
+            try {
+                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(fallbackIntent)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to open settings fallback", e2)
+                _toastMessage.value = "Please enable 'Install Unknown Apps' for Song in System Settings manually."
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching permission settings", e)
+            _toastMessage.value = "Unable to open settings automatically."
+        }
     }
 
     fun remindLater(millisFromNow: Long = 86_400_000L) {

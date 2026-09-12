@@ -1,8 +1,10 @@
 package com.example.song.data.ota
 
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -77,7 +79,7 @@ class OtaUpdateManager(
 
     /**
      * Checks GitHub for the latest release.
-     * @param force If true, bypasses the 8-hour rate limiting cache check.
+     * @param force If true, bypasses the rate limiting cache check.
      */
     suspend fun checkForUpdate(
         force: Boolean = false,
@@ -122,6 +124,7 @@ class OtaUpdateManager(
                 preferences.setPendingChangelog(latestRelease.body)
                 UpdateCheckResult.UpdateAvailable(latestRelease, apkAsset)
             } else {
+                cleanDownloadedApks()
                 UpdateCheckResult.UpToDate(currentVersionName)
             }
         } catch (e: Exception) {
@@ -131,7 +134,37 @@ class OtaUpdateManager(
     }
 
     /**
+     * Checks if the APK file for the given release/asset already exists locally and is valid.
+     * Strictly verifies local file length against expected asset size to prevent partial download installation crashes.
+     */
+    fun getExistingDownloadedApk(release: GitHubRelease, asset: GitHubAsset): File? {
+        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return null
+        val fileName = asset.name.ifBlank { "song-release-${release.tagName}.apk" }
+        val targetFile = File(downloadsDir, fileName)
+
+        if (targetFile.exists()) {
+            val localSize = targetFile.length()
+            val expectedSize = asset.size
+
+            if (localSize > 0) {
+                if (expectedSize > 0 && localSize != expectedSize) {
+                    Log.w(TAG, "Partial/corrupted APK detected! Local size: $localSize, Expected size: $expectedSize. Deleting corrupt file.")
+                    targetFile.delete()
+                    return null
+                }
+                Log.d(TAG, "Found valid complete cached APK file ($localSize bytes) at ${targetFile.absolutePath}")
+                return targetFile
+            } else {
+                Log.w(TAG, "Empty APK file found ($localSize bytes). Deleting.")
+                targetFile.delete()
+            }
+        }
+        return null
+    }
+
+    /**
      * Enqueues the APK asset download via Android DownloadManager.
+     * Includes Low Storage space check and System DownloadManager service validation.
      */
     suspend fun startDownload(release: GitHubRelease, asset: GitHubAsset): Long {
         val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -139,6 +172,32 @@ class OtaUpdateManager(
 
         if (!downloadsDir.exists()) {
             downloadsDir.mkdirs()
+        }
+
+        // Low Storage Space Check: Verify usable space >= asset.size + 10MB safety margin
+        val requiredSpace = if (asset.size > 0) asset.size + (10 * 1024 * 1024L) else 250 * 1024 * 1024L
+        val usableSpace = downloadsDir.usableSpace
+        if (usableSpace < requiredSpace) {
+            val reqMb = requiredSpace / (1024 * 1024)
+            val availMb = usableSpace / (1024 * 1024)
+            throw IllegalStateException("Insufficient storage space for update. Required: ~${reqMb}MB, Available: ${availMb}MB")
+        }
+
+        // Validate that System DownloadManager provider is enabled
+        try {
+            val state = context.packageManager.getApplicationEnabledSetting("com.android.providers.downloads")
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
+                state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+                state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
+            ) {
+                throw IllegalStateException("System Download Manager is disabled in Settings. Please enable Download Manager to download updates.")
+            }
+        } catch (e: IllegalArgumentException) {
+            // Package name not found on customized OS skins; proceed to try-catch enqueue
+        } catch (e: IllegalStateException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not query DownloadManager state", e)
         }
 
         val fileName = asset.name.ifBlank { "song-release-${release.tagName}.apk" }
@@ -154,7 +213,16 @@ class OtaUpdateManager(
             .setMimeType("application/vnd.android.package-archive")
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
 
-        val downloadId = downloadManager.enqueue(request)
+        val downloadId = try {
+            downloadManager.enqueue(request)
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "DownloadManager enqueue failed (Service disabled or invalid request)", e)
+            throw IllegalStateException("System Download Manager is disabled or unavailable. Please enable Download Manager in System Settings.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enqueue download", e)
+            throw IllegalStateException("Download failed: ${e.message}")
+        }
+
         preferences.setActiveDownloadId(downloadId)
         preferences.setDownloadedApkPath(targetFile.absolutePath)
         Log.d(TAG, "Enqueued download ID: $downloadId to path: ${targetFile.absolutePath}")
@@ -236,6 +304,9 @@ class OtaUpdateManager(
             Log.d(TAG, "Launching package installer intent for $apkUri")
             context.startActivity(installIntent)
             return true
+        } catch (e: ActivityNotFoundException) {
+            Log.e(TAG, "No activity found on system to handle package installation intent", e)
+            return false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch package installer", e)
             return false
