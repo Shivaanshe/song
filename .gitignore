@@ -13,3 +13,23 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Keystores
+*.jks
+*.keystore
+
+# Build Outputs & APKs
+app/release/
+*.apk
+*.aab
+
+# Android Profiler Traces & Logs
+*.trace*
+*.asdb
+*.logcat
+*.log
+trace_processor
+
+# AI Agent Artifacts & Scratchpads
+.artifacts/
+.kotlin/
