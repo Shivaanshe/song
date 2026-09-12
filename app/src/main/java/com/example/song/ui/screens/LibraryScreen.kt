@@ -104,7 +104,6 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     
     val isArrangeModeEnabled by viewModel.isArrangeModeEnabled.collectAsState()
-    var localSongs by remember { mutableStateOf(emptyList<Song>()) }
     var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
     var activeDraggedItem by remember { mutableStateOf<Song?>(null) }
     var currentDragY by remember { mutableFloatStateOf(0f) }
@@ -113,7 +112,11 @@ fun LibraryScreen(
     var measuredItemHeightPx by remember { mutableFloatStateOf(0f) }
     var isManualOrder by remember { mutableStateOf(false) }
 
-    LaunchedEffect(songs, draggedItemIndex, isManualOrder) { if (draggedItemIndex == null && !isManualOrder) localSongs = songs }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            viewModel.clearOnlineSearchResults()
+        }
+    }
     LaunchedEffect(isArrangeModeEnabled) { if (!isArrangeModeEnabled) { draggedItemIndex = null; activeDraggedItem = null; targetIndex = null } }
 
     LaunchedEffect(listState) {
@@ -259,12 +262,12 @@ fun LibraryScreen(
                 }
 
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().dragGestureHandler(listState = listState, isReorderMode = isArrangeModeEnabled,
-                    onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, localSongs.map { it.id }) },
-                    onSelectUpdate = { key -> if (key is Int) viewModel.updateRangeSelection(key, localSongs.map { it.id }) },
+                    onSelectStart = { key -> if (key is Int) viewModel.startRangeSelection(key, songs.map { it.id }) },
+                    onSelectUpdate = { key -> if (key is Int) viewModel.updateRangeSelection(key, songs.map { it.id }) },
                     onSelectEnd = { viewModel.endRangeSelection() },
-                    onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = localSongs.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = localSongs[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
-                    onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val hitKey = hitItem.key; if (hitKey is Int) { val newTarget = localSongs.indexOfFirst { it.id == hitKey }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } } },
-                    onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = localSongs.toMutableList(); val song = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, song); localSongs = mutable; viewModel.updateSongs(localSongs.mapIndexed { index, item -> item.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
+                    onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = songs.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = songs[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
+                    onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val hitKey = hitItem.key; if (hitKey is Int) { val newTarget = songs.indexOfFirst { it.id == hitKey }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } } },
+                    onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = songs.toMutableList(); val song = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, song); viewModel.updateSongs(mutable.mapIndexed { index, item -> item.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
                 ), contentPadding = PaddingValues(bottom = 80.dp)) {
                     if (!isSearching) {
                         item {
@@ -377,46 +380,47 @@ fun LibraryScreen(
                                 }
                             }
                         }
-                        if (isSearching && searchQuery.isNotBlank() && songs.isEmpty()) {
-                            item {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 60.dp).padding(horizontal = 24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    if (isOnlineSearching) {
-                                        CircularProgressIndicator(color = Color(0xFF00E676))
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Text("Searching YouTube (<10 mins)...", color = Color.White.copy(alpha = 0.72f))
-                                    } else if (onlineSearchResults.isEmpty()) {
-                                        Text("No local tracks found.", color = Color.White.copy(alpha = 0.72f))
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Button(
-                                            onClick = { viewModel.searchOnline(searchQuery, isLibrary = true) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
-                                        ) {
-                                            Text("Search & Download Offline (<10m)", fontWeight = FontWeight.Bold, color = Color.Black)
-                                        }
+                    }
+                    if (isSearching && searchQuery.isNotBlank() && songs.isEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 60.dp).padding(horizontal = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (isOnlineSearching) {
+                                    CircularProgressIndicator(color = Color(0xFF00E676))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Searching YouTube (<10 mins)...", color = Color.White.copy(alpha = 0.72f))
+                                } else if (onlineSearchResults.isEmpty()) {
+                                    Text("No local tracks found.", color = Color.White.copy(alpha = 0.72f))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = { viewModel.searchOnline(searchQuery, isLibrary = true) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676))
+                                    ) {
+                                        Text("Search & Download Offline (<10m)", fontWeight = FontWeight.Bold, color = Color.Black)
                                     }
                                 }
                             }
-                            if (onlineSearchResults.isNotEmpty()) {
-                                item {
-                                    Text(
-                                        "Online Download Results (<10 mins)",
-                                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
-                                    )
-                                }
-                                items(onlineSearchResults, key = { it.youtubeUrl }) { item ->
-                                    OnlineSearchResultCard(
-                                        item = item,
-                                        onAddClick = { viewModel.ingestOnlineItem(item, isLibrary = true) }
-                                    )
-                                }
+                        }
+                        if (onlineSearchResults.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "Online Download Results (<10 mins)",
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                )
                             }
-                        } else {
+                            items(onlineSearchResults, key = { it.youtubeUrl }) { item ->
+                                OnlineSearchResultCard(
+                                    item = item,
+                                    onAddClick = { viewModel.ingestOnlineItem(item, isLibrary = true) }
+                                )
+                            }
+                        }
+                    } else {
                             item { Text("Library Tracks", modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)) }
-                            itemsIndexed(localSongs, key = { _, song -> song.id }) { index, song ->
+                            itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                                 val isDragging = draggedItemIndex == index
                                 val itemHeightPx = measuredItemHeightPx
                                 val targetDisplacement = when { isDragging -> 0f; draggedItemIndex == null || targetIndex == null || itemHeightPx == 0f -> 0f; draggedItemIndex!! < targetIndex!! && index > draggedItemIndex!! && index <= targetIndex!! -> -itemHeightPx; draggedItemIndex!! > targetIndex!! && index < draggedItemIndex!! && index >= targetIndex!! -> itemHeightPx; else -> 0f }
@@ -424,13 +428,12 @@ fun LibraryScreen(
                                 val isGhostSlot = !isDragging && targetIndex == index
                                 Box(modifier = Modifier.fillMaxWidth().animateItem().zIndex(if (isGhostSlot) 1f else 0f).onGloballyPositioned { if (measuredItemHeightPx == 0f) measuredItemHeightPx = it.size.height.toFloat() }.graphicsLayer { translationY = itemTranslationY }) {
                                     if (isGhostSlot) { Box(modifier = Modifier.fillMaxWidth().height(with(LocalDensity.current) { measuredItemHeightPx.toDp() }).graphicsLayer { translationY = -itemTranslationY }.padding(horizontal = 24.dp, vertical = 8.dp).border(width = 2.dp, brush = Brush.linearGradient(colors = listOf(Color(0xFFFF4081).copy(alpha = 0.5f), Color(0xFFFF4081).copy(alpha = 0.2f))), shape = RoundedCornerShape(20.dp)).background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Text("DROP SONG HERE", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold, color = Color(0xFFFF4081).copy(alpha = 0.6f), letterSpacing = 2.sp)) } }
-                                    Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) { SongListItem(song = song, onPlayClick = { if (isSelectionMode) viewModel.toggleSongSelection(song.id) else { viewModel.playSong(song, localSongs); onSongClick() } }, onFavoriteToggle = { viewModel.updateFavorite(song, !song.isFavorite) }, onDelete = { viewModel.deleteSong(song.id) }, isSelected = selectedSongIds.contains(song.id), onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleSongSelection(song.id) }, selectionMode = isSelectionMode, isPlaying = currentSong?.id == song.id, isArrangeMode = isArrangeModeEnabled, isDragging = false) }
+                                    Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) { SongListItem(song = song, onPlayClick = { if (isSelectionMode) viewModel.toggleSongSelection(song.id) else { viewModel.playSong(song, songs); onSongClick() } }, onFavoriteToggle = { viewModel.updateFavorite(song, !song.isFavorite) }, onDelete = { viewModel.deleteSong(song.id) }, isSelected = selectedSongIds.contains(song.id), onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleSongSelection(song.id) }, selectionMode = isSelectionMode, isPlaying = currentSong?.id == song.id, isArrangeMode = isArrangeModeEnabled, isDragging = false) }
                                 }
                             }
                         }
                     }
                 }
-            }
         }
         activeDraggedItem?.let { draggedItem ->
             Box(modifier = Modifier.fillMaxWidth().offset { IntOffset(0, (currentDragY - itemTouchOffset).roundToInt()) }.zIndex(100f)) {

@@ -19,6 +19,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import com.example.song.SongApplication
 import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.Song
@@ -28,6 +29,10 @@ import com.example.song.service.MusicService
 import com.example.song.util.PulseLogger
 import com.example.song.util.SpotifyResolver
 import com.example.song.util.YoutubeStreamHandler
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +48,8 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Collections
+import java.util.concurrent.ConcurrentLinkedQueue
 
 enum class ItemActionState {
     Idle, Loading, Success
@@ -825,6 +832,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
+        if (query.isBlank()) {
+            clearOnlineSearchResults()
+        }
     }
 
     fun fetchDownloadMetadata(url: String) {
@@ -886,23 +896,141 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startBatchDownload(asPlaylist: Boolean) {
-        viewModelScope.launch {
-            val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
-            if (!isReadyFlow.value) {
-                _downloadState.value = DownloadState.Downloading(0f)
+    // Queue management for sequential downloads
+    private val downloadQueue = ConcurrentLinkedQueue<DownloadRequest>()
+    private val activeDownloadUrls = Collections.synchronizedSet(mutableSetOf<String>())
+    private var queueWorkerJob: Job? = null
+
+    private fun enqueueDownloadRequest(request: DownloadRequest): CompletableDeferred<Unit> {
+        val urlKey = request.url.trim()
+
+        synchronized(activeDownloadUrls) {
+            if (activeDownloadUrls.contains(urlKey)) {
+                PulseLogger.log("Download already active or queued for URL: $urlKey", isError = false)
+                val existing = downloadQueue.find { it.url.trim() == urlKey }
+                return existing?.deferred ?: request.deferred.apply { complete(Unit) }
+            }
+            activeDownloadUrls.add(urlKey)
+        }
+
+        val currentStates = _itemActionStates.value.toMutableMap()
+        currentStates[urlKey] = ItemActionState.Loading
+        _itemActionStates.value = currentStates
+
+        downloadQueue.add(request)
+        startQueueWorkerIfNeeded()
+        return request.deferred
+    }
+
+    private fun startQueueWorkerIfNeeded() {
+        if (queueWorkerJob?.isActive == true) return
+
+        queueWorkerJob = viewModelScope.launch(Dispatchers.IO) {
+            var completedCount = 0
+
+            while (isActive) {
+                val request = downloadQueue.poll() ?: break
+                val currentTotal = completedCount + downloadQueue.size + 1
+                val currentIndex = completedCount + 1
+
+                val isReadyFlow = SongApplication.getInstance().isReady
+                if (!isReadyFlow.value) {
+                    _downloadState.value = DownloadState.Checking
+                    try {
+                        withTimeout(15000) {
+                            isReadyFlow.first { it }
+                        }
+                    } catch (e: Exception) {
+                        _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
+                        onRequestFailed(request, e)
+                        delay(2000)
+                        if (downloadQueue.isEmpty()) {
+                            _downloadState.value = DownloadState.Idle
+                        }
+                        continue
+                    }
+                }
+
                 try {
-                    withTimeout(15000) {
-                        isReadyFlow.first { it }
+                    PulseLogger.log("Processing queued download ($currentIndex/$currentTotal): ${request.overrideTitle ?: request.url}")
+                    _downloadState.value = DownloadState.Downloading(0f, currentIndex, currentTotal)
+
+                    repository.downloadYouTubeAudio(
+                        url = request.url,
+                        playlistId = request.playlistId,
+                        overrideTitle = request.overrideTitle,
+                        overrideArtist = request.overrideArtist,
+                        overrideImageUrl = request.overrideImageUrl
+                    ) { progress, _ ->
+                        _downloadState.value = DownloadState.Downloading(progress, currentIndex, currentTotal)
+                    }
+
+                    _downloadState.value = DownloadState.Downloading(100f, currentIndex, currentTotal)
+                    PulseLogger.log("Finished queued download: ${request.overrideTitle ?: request.url}")
+
+                    val states = _itemActionStates.value.toMutableMap()
+                    states[request.url] = ItemActionState.Success
+                    _itemActionStates.value = states
+
+                    request.deferred.complete(Unit)
+                    completedCount++
+
+                    viewModelScope.launch {
+                        delay(3000)
+                        if (_itemActionStates.value[request.url] == ItemActionState.Success) {
+                            val updated = _itemActionStates.value.toMutableMap()
+                            updated.remove(request.url)
+                            _itemActionStates.value = updated
+                        }
                     }
                 } catch (e: Exception) {
-                    _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
-                    delay(2000)
-                    _downloadState.value = DownloadState.Idle
-                    return@launch
+                    onRequestFailed(request, e)
+                } finally {
+                    synchronized(activeDownloadUrls) {
+                        activeDownloadUrls.remove(request.url.trim())
+                    }
                 }
             }
 
+            if (completedCount > 0) {
+                _downloadState.value = DownloadState.Success
+                delay(1500)
+                if (downloadQueue.isEmpty()) {
+                    _downloadState.value = DownloadState.Idle
+                }
+            }
+        }
+    }
+
+    private fun onRequestFailed(request: DownloadRequest, e: Exception) {
+        val states = _itemActionStates.value.toMutableMap()
+        states.remove(request.url)
+        _itemActionStates.value = states
+
+        if (e is CancellationException || e.message == "Download cancelled") {
+            _downloadState.value = DownloadState.Idle
+        } else {
+            PulseLogger.log("Queued download failed: ${e.localizedMessage}", isError = true)
+            val isOffline = !isConnectedToInternet() ||
+                           (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
+                           e is UnknownHostException ||
+                           e is SocketTimeoutException ||
+                           e is IOException
+
+            val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Download failed: ${e.localizedMessage ?: "Unknown error"}"
+            _downloadState.value = DownloadState.Error(msg)
+            viewModelScope.launch {
+                delay(2500)
+                if (downloadQueue.isEmpty() && _downloadState.value is DownloadState.Error) {
+                    _downloadState.value = DownloadState.Idle
+                }
+            }
+        }
+        request.deferred.completeExceptionally(e)
+    }
+
+    fun startBatchDownload(asPlaylist: Boolean) {
+        viewModelScope.launch {
             val items = _pendingDownloadItems.value.filter { !it.isPlaylist }
             if (items.isEmpty()) return@launch
 
@@ -915,28 +1043,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _pendingDownloadItems.value = emptyList()
-            _downloadState.value = DownloadState.Downloading(0f, 1, items.size)
-            
-            items.forEachIndexed { index, item ->
-                try {
-                    _downloadState.value = DownloadState.Downloading(0f, index + 1, items.size)
-                    repository.downloadYouTubeAudio(
-                        url = item.youtubeUrl, 
-                        playlistId = playlistId,
-                        overrideTitle = item.title,
-                        overrideArtist = item.artist,
-                        overrideImageUrl = item.thumbnailUrl
-                    ) { progress, _ ->
-                        _downloadState.value = DownloadState.Downloading(progress, index + 1, items.size)
-                    }
-                } catch (e: Exception) {
-                    Log.e("SongViewModel", "Failed to download ${item.title}", e)
-                }
+
+            items.forEach { item ->
+                val request = DownloadRequest(
+                    url = item.youtubeUrl,
+                    isLibrary = true,
+                    overrideTitle = item.title,
+                    overrideArtist = item.artist,
+                    overrideImageUrl = item.thumbnailUrl,
+                    playlistId = playlistId
+                )
+                enqueueDownloadRequest(request)
             }
-            
-            _downloadState.value = DownloadState.Success
-            delay(1000)
-            _downloadState.value = DownloadState.Idle
         }
     }
 
@@ -951,57 +1069,25 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         overrideImageUrl: String? = null
     ) {
         viewModelScope.launch {
-            val isReadyFlow = com.example.song.SongApplication.getInstance().isReady
-            if (!isReadyFlow.value) {
-                _downloadState.value = DownloadState.Checking
-                try {
-                    withTimeout(15000) {
-                        isReadyFlow.first { it }
-                    }
-                } catch (e: Exception) {
-                    _downloadState.value = DownloadState.Error("Music engine failed to initialize.")
-                    delay(2000)
-                    _downloadState.value = DownloadState.Idle
-                    return@launch
-                }
-            }
-
+            val request = DownloadRequest(
+                url = url,
+                isLibrary = true,
+                overrideTitle = overrideTitle,
+                overrideArtist = overrideArtist,
+                overrideImageUrl = overrideImageUrl
+            )
             try {
-                PulseLogger.log("Starting download: $overrideTitle")
-                _downloadState.value = DownloadState.Downloading(0f)
-                repository.downloadYouTubeAudio(
-                    url = url,
-                    overrideTitle = overrideTitle,
-                    overrideArtist = overrideArtist,
-                    overrideImageUrl = overrideImageUrl
-                ) { progress, _ ->
-                    _downloadState.value = DownloadState.Downloading(progress)
-                }
-                _downloadState.value = DownloadState.Success
-                PulseLogger.log("Download finished: $overrideTitle")
-                delay(1000)
-                _downloadState.value = DownloadState.Idle
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException || e.message == "Download cancelled") {
-                    _downloadState.value = DownloadState.Idle
-                } else {
-                    PulseLogger.log("Download failed: ${e.localizedMessage}", isError = true)
-                    val isOffline = !isConnectedToInternet() ||
-                                   (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
-                                   e is UnknownHostException ||
-                                   e is SocketTimeoutException ||
-                                   e is IOException
-
-                    val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Invalid link"
-                    _downloadState.value = DownloadState.Error(msg)
-                    delay(2000)
-                    _downloadState.value = DownloadState.Idle
-                }
+                enqueueDownloadRequest(request).await()
+            } catch (_: Exception) {
             }
         }
     }
 
     fun cancelDownload() {
+        downloadQueue.clear()
+        synchronized(activeDownloadUrls) {
+            activeDownloadUrls.clear()
+        }
         repository.cancelDownload()
         _downloadState.value = DownloadState.Idle
     }
@@ -1032,34 +1118,28 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun ingestOnlineItem(item: StreamingItem, isLibrary: Boolean) {
-        viewModelScope.launch {
-            val key = item.youtubeUrl
+    suspend fun ingestOnlineItem(item: StreamingItem, isLibrary: Boolean) {
+        if (isLibrary) {
+            val request = DownloadRequest(
+                url = item.youtubeUrl,
+                isLibrary = true,
+                overrideTitle = item.title,
+                overrideArtist = item.artist,
+                overrideImageUrl = item.thumbnailUrl
+            )
+            enqueueDownloadRequest(request).await()
+        } else {
+            repository.insertStreamingItems(listOf(item))
             val currentStates = _itemActionStates.value.toMutableMap()
-            currentStates[key] = ItemActionState.Loading
+            currentStates[item.youtubeUrl] = ItemActionState.Success
             _itemActionStates.value = currentStates
-
-            try {
-                if (isLibrary) {
-                    repository.downloadYouTubeAudio(
-                        url = item.youtubeUrl,
-                        overrideTitle = item.title,
-                        overrideArtist = item.artist,
-                        overrideImageUrl = item.thumbnailUrl
-                    ) { _, _ -> }
-                } else {
-                    repository.insertStreamingItems(listOf(item))
-                }
-                currentStates[key] = ItemActionState.Success
-                _itemActionStates.value = currentStates
+            viewModelScope.launch {
                 delay(3000)
-                currentStates.remove(key)
-                _itemActionStates.value = currentStates
-            } catch (e: Exception) {
-                e.printStackTrace()
-                currentStates.remove(key)
-                _itemActionStates.value = currentStates
-                _playbackError.value = "Failed to add item: ${e.localizedMessage}"
+                if (_itemActionStates.value[item.youtubeUrl] == ItemActionState.Success) {
+                    val updated = _itemActionStates.value.toMutableMap()
+                    updated.remove(item.youtubeUrl)
+                    _itemActionStates.value = updated
+                }
             }
         }
     }
@@ -1101,6 +1181,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
+data class DownloadRequest(
+    val url: String,
+    val isLibrary: Boolean,
+    val overrideTitle: String? = null,
+    val overrideArtist: String? = null,
+    val overrideImageUrl: String? = null,
+    val playlistId: Int? = null,
+    val deferred: CompletableDeferred<Unit> = CompletableDeferred()
+)
 
 sealed class DownloadState {
     data object Idle : DownloadState()

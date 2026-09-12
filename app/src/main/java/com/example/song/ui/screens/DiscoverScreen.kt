@@ -84,6 +84,12 @@ fun DiscoverScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
         selectedPlaylist = null
     }
 
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            viewModel.clearOnlineSearchResults()
+        }
+    }
+
     val onlineSearchResults by viewModel.onlineSearchResults.collectAsState()
     val isOnlineSearching by viewModel.isOnlineSearching.collectAsState()
     val itemActionStates by viewModel.itemActionStates.collectAsState()

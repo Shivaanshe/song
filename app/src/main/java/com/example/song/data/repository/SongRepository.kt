@@ -386,6 +386,12 @@ class SongRepository(
             }
         } catch (e: Exception) {
             Log.e("SongRepository", "General error during download", e)
+            val tempFiles = musicDir.listFiles { _, name -> name.startsWith(requestId) }
+            tempFiles?.forEach { file ->
+                try {
+                    if (file.exists()) file.delete()
+                } catch (_: Exception) {}
+            }
             throw e
         } finally {
             currentRequestId = null
