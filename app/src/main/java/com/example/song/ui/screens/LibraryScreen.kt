@@ -62,13 +62,18 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.ui.text.style.TextAlign
 
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun LibraryScreen(
     viewModel: SongViewModel,
     onPlaylistClick: (Playlist) -> Unit,
     onFavoritesClick: () -> Unit,
-    onSongClick: () -> Unit
+    onSongClick: () -> Unit,
+    spotlightController: SpotlightController? = null
 ) {
     val songs by viewModel.filteredSongs.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -165,7 +170,7 @@ fun LibraryScreen(
                                 Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) 
                             }
                         } else {
-                            IconButton(onClick = { showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) }
+                            IconButton(onClick = { showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(Color.White.copy(alpha = 0.3f), CircleShape).spotlightTarget(TourStep.STEP_5_LIBRARY_IMPORT, spotlightController)) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) }
                         }
                     } }
                 )

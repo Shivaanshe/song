@@ -23,13 +23,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.song.data.model.Song
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
 
 @Composable
 fun NowPlayingBar(
     song: Song?,
     isPlaying: Boolean,
     onTogglePlay: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    spotlightController: SpotlightController? = null
 ) {
     if (song == null) return
 
@@ -39,6 +43,7 @@ fun NowPlayingBar(
             .height(76.dp)
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(20.dp))
+            .spotlightTarget(TourStep.STEP_6_NOW_PLAYING, spotlightController)
             .clickable { onClick() },
         color = Color.White.copy(alpha = 0.6f),
         tonalElevation = 0.dp

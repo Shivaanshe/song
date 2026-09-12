@@ -27,6 +27,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.song.data.model.Song
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
 
 @Composable
 fun CompactPlayerPane(
@@ -36,7 +39,8 @@ fun CompactPlayerPane(
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    spotlightController: SpotlightController? = null
 ) {
     if (song == null) return
 
@@ -46,6 +50,7 @@ fun CompactPlayerPane(
             .padding(16.dp)
             .clip(RoundedCornerShape(32.dp))
             .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
+            .spotlightTarget(TourStep.STEP_6_NOW_PLAYING, spotlightController)
             .clickable { onClick() },
         color = Color.White.copy(alpha = 0.2f),
         tonalElevation = 0.dp

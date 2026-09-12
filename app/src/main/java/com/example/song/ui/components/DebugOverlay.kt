@@ -30,10 +30,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
 import com.example.song.viewmodel.SongViewModel
 
 @Composable
-fun DebugOverlay(viewModel: SongViewModel) {
+fun DebugOverlay(
+    viewModel: SongViewModel,
+    spotlightController: SpotlightController? = null
+) {
     var showDialog by remember { mutableStateOf(false) }
     var showFullError by remember { mutableStateOf(false) }
     
@@ -58,7 +64,8 @@ fun DebugOverlay(viewModel: SongViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 8.dp, bottom = 90.dp)
-                .size(32.dp),
+                .size(32.dp)
+                .spotlightTarget(TourStep.STEP_7_ARRANGE_MODE, spotlightController),
             containerColor = Color.Black.copy(alpha = 0.4f),
             contentColor = Color.White,
             shape = CircleShape

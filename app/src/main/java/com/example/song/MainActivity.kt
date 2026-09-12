@@ -55,7 +55,14 @@ import com.example.song.ui.screens.*
 import com.example.song.ui.theme.SongTheme
 import com.example.song.viewmodel.OtaUpdateViewModel
 import com.example.song.viewmodel.SongViewModel
+import com.example.song.data.model.Song
+import com.example.song.data.preferences.TourPreferences
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.SpotlightOverlay
+import com.example.song.ui.spotlight.TourStep
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -149,9 +156,57 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
     BackHandler(enabled = currentDestination?.route != "main" && currentDestination?.route != null) {
         navController.popBackStack()
     }
-    
+
+    // Pager State & Coroutine Scope
+    val pagerState = rememberPagerState(pageCount = { 3 })
+    val scope = rememberCoroutineScope()
+
+    // Spotlight Walkthrough State & Preferences
+    val tourPreferences = remember { TourPreferences(context) }
+    val hasCompletedTour by tourPreferences.hasCompletedTour.collectAsState(initial = true)
+    val spotlightController = remember { SpotlightController() }
+    val activeStep by spotlightController.activeStep.collectAsState()
+
+    LaunchedEffect(hasCompletedTour) {
+        if (!hasCompletedTour) {
+            spotlightController.startTour()
+        }
+    }
+
+    LaunchedEffect(spotlightController) {
+        spotlightController.onPageChangeRequested = { targetPage ->
+            scope.launch {
+                if (pagerState.currentPage != targetPage) {
+                    pagerState.animateScrollToPage(targetPage)
+                }
+                snapshotFlow { pagerState.isScrollInProgress }.first { isScrolling -> !isScrolling }
+                delay(150)
+                spotlightController.setTransitioning(false)
+            }
+        }
+        spotlightController.onTourFinished = {
+            scope.launch {
+                tourPreferences.setTourCompleted(true)
+            }
+        }
+    }
+
     val currentSong by viewModel.currentPlayingSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+
+    val isStep6Active = activeStep == TourStep.STEP_6_NOW_PLAYING
+    val effectiveSong = currentSong ?: if (isStep6Active) {
+        Song(
+            id = -1,
+            title = "Pulse Music Preview",
+            artist = "Tap to expand player & queue",
+            audioUri = "",
+            imageUrl = null,
+            isFavorite = false,
+            duration = 180000L,
+            position = 0
+        )
+    } else null
 
     val showUpdateModal by otaViewModel.showUpdateModal.collectAsState()
     val showWhatsNewModal by otaViewModel.showWhatsNewModal.collectAsState()
@@ -174,10 +229,6 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
     val mainScreens = listOf("main") // Top-level screen containing the pager
     val showBottomBar = currentDestination?.route in mainScreens
 
-    // Pager State for top-level navigation (Discover, Favorites, Library)
-    val pagerState = rememberPagerState(pageCount = { 3 })
-    val scope = rememberCoroutineScope()
-
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -199,7 +250,8 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                         pagerOffset = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                         onPageSelected = { page ->
                             scope.launch { pagerState.animateScrollToPage(page) }
-                        }
+                        },
+                        spotlightController = spotlightController
                     )
 
                     Row(
@@ -207,15 +259,16 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                             .weight(1f)
                             .padding(start = 12.dp)
                     ) {
-                        if (currentSong != null) {
+                        if (effectiveSong != null) {
                             CompactPlayerPane(
-                                song = currentSong,
+                                song = effectiveSong,
                                 isPlaying = isPlaying,
                                 onTogglePlay = { viewModel.togglePlayPause() },
                                 onSkipNext = { viewModel.skipToNext() },
                                 onSkipPrevious = { viewModel.skipToPrevious() },
                                 onClick = { navController.navigate("player") },
-                                modifier = Modifier.weight(0.45f)
+                                modifier = Modifier.weight(0.45f),
+                                spotlightController = spotlightController
                             )
                         }
 
@@ -225,7 +278,8 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                                 viewModel = viewModel,
                                 otaViewModel = otaViewModel,
                                 navController = navController,
-                                scope = scope
+                                scope = scope,
+                                spotlightController = spotlightController
                             )
                         }
                     }
@@ -237,12 +291,13 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                     bottomBar = {
                         if (showBottomBar) {
                             Column(modifier = Modifier.navigationBarsPadding()) {
-                                if (currentDestination?.route != "player" && currentSong != null) {
+                                if (currentDestination?.route != "player" && effectiveSong != null) {
                                     NowPlayingBar(
-                                        song = currentSong,
+                                        song = effectiveSong,
                                         isPlaying = isPlaying,
                                         onTogglePlay = { viewModel.togglePlayPause() },
-                                        onClick = { navController.navigate("player") }
+                                        onClick = { navController.navigate("player") },
+                                        spotlightController = spotlightController
                                     )
                                 }
                                 GlassNavigationBar(
@@ -251,7 +306,8 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                                         scope.launch {
                                             pagerState.animateScrollToPage(page)
                                         }
-                                    }
+                                    },
+                                    spotlightController = spotlightController
                                 )
                             }
                         }
@@ -277,7 +333,8 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                                     viewModel = viewModel,
                                     otaViewModel = otaViewModel,
                                     navController = navController,
-                                    scope = scope
+                                    scope = scope,
+                                    spotlightController = spotlightController
                                 )
                             }
                             composable(
@@ -323,7 +380,10 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
             }
 
             // Floating Debug Overlay
-            DebugOverlay(viewModel)
+            DebugOverlay(viewModel, spotlightController)
+
+            // Interactive Spotlight Walkthrough Overlay
+            SpotlightOverlay(controller = spotlightController)
         }
     }
 }
@@ -334,7 +394,8 @@ fun MainPagerContent(
     viewModel: SongViewModel,
     otaViewModel: OtaUpdateViewModel,
     navController: NavController,
-    scope: CoroutineScope
+    scope: CoroutineScope,
+    spotlightController: SpotlightController? = null
 ) {
     HorizontalPager(
         state = pagerState,
@@ -345,7 +406,8 @@ fun MainPagerContent(
             0 -> DiscoverScreen(
                 viewModel = viewModel,
                 onSongClick = { navController.navigate("player") },
-                onSettingsClick = { otaViewModel.openSettingsModal() }
+                onSettingsClick = { otaViewModel.openSettingsModal() },
+                spotlightController = spotlightController
             )
             1 -> FavoritesScreen(
                 viewModel = viewModel,
@@ -357,7 +419,8 @@ fun MainPagerContent(
                 onFavoritesClick = { 
                     scope.launch { pagerState.animateScrollToPage(1) }
                 },
-                onSongClick = { navController.navigate("player") }
+                onSongClick = { navController.navigate("player") },
+                spotlightController = spotlightController
             )
         }
     }

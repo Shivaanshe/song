@@ -24,6 +24,9 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.abs
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Discover : Screen("discover", "Discover", Icons.Default.MusicNote)
@@ -34,7 +37,8 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 @Composable
 fun GlassNavigationBar(
     pagerOffset: Float,
-    onPageSelected: (Int) -> Unit
+    onPageSelected: (Int) -> Unit,
+    spotlightController: SpotlightController? = null
 ) {
     val items = listOf(Screen.Discover, Screen.Favorites, Screen.Library)
     val itemWidth = 72.dp
@@ -82,6 +86,11 @@ fun GlassNavigationBar(
                             modifier = Modifier
                                 .width(itemWidth)
                                 .fillMaxHeight()
+                                .then(
+                                    if (screen == Screen.Library) {
+                                        Modifier.spotlightTarget(TourStep.STEP_4_NAVIGATION, spotlightController)
+                                    } else Modifier
+                                )
                                 .clickable(
                                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                     indication = null
@@ -105,7 +114,8 @@ fun GlassNavigationBar(
 @Composable
 fun GlassNavigationRail(
     pagerOffset: Float,
-    onPageSelected: (Int) -> Unit
+    onPageSelected: (Int) -> Unit,
+    spotlightController: SpotlightController? = null
 ) {
     val items = listOf(Screen.Discover, Screen.Favorites, Screen.Library)
     val itemHeight = 64.dp
@@ -153,6 +163,11 @@ fun GlassNavigationRail(
                         Box(
                             modifier = Modifier
                                 .size(width = railWidth, height = itemHeight)
+                                .then(
+                                    if (screen == Screen.Library) {
+                                        Modifier.spotlightTarget(TourStep.STEP_4_NAVIGATION, spotlightController)
+                                    } else Modifier
+                                )
                                 .clickable(
                                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                     indication = null

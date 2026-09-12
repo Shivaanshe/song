@@ -62,13 +62,18 @@ import com.example.song.viewmodel.SongViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 
+import com.example.song.ui.spotlight.SpotlightController
+import com.example.song.ui.spotlight.TourStep
+import com.example.song.ui.spotlight.spotlightTarget
+
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun DiscoverScreen(
     viewModel: SongViewModel,
     onSongClick: () -> Unit,
-    onSettingsClick: () -> Unit = {}
+    onSettingsClick: () -> Unit = {},
+    spotlightController: SpotlightController? = null
 ) {
     val items by viewModel.topLevelStreamingItems.collectAsState()
     val isExtracting by viewModel.isExtracting.collectAsState()
@@ -168,7 +173,7 @@ fun DiscoverScreen(
                                 ) 
                             } 
                         },
-                        navigationIcon = { if (!isSearching && !isArrangeModeEnabled) { IconButton(onClick = { isSearching = true }, modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242)) } } },
+                        navigationIcon = { if (!isSearching && !isArrangeModeEnabled) { IconButton(onClick = { isSearching = true }, modifier = Modifier.background(Color.White.copy(alpha = 0.3f), CircleShape).spotlightTarget(TourStep.STEP_1_SEARCH, spotlightController)) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF424242)) } } },
                         actions = { 
                             if (!isSearching) { 
                                 if (isArrangeModeEnabled) {
@@ -179,12 +184,12 @@ fun DiscoverScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(
                                             onClick = onSettingsClick,
-                                            modifier = Modifier.size(40.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                            modifier = Modifier.size(40.dp).background(Color.White.copy(alpha = 0.3f), CircleShape).spotlightTarget(TourStep.STEP_3_OTA_UPDATES, spotlightController)
                                         ) {
                                             Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings & Updates", tint = Color(0xFF424242))
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        IconButton(onClick = { if (isEngineReady) showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f), CircleShape), enabled = isEngineReady) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) } 
+                                        IconButton(onClick = { if (isEngineReady) showAddMenu = !showAddMenu }, modifier = Modifier.size(48.dp).background(if (isEngineReady) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.2f), CircleShape).spotlightTarget(TourStep.STEP_2_CACHE_ENGINE, spotlightController), enabled = isEngineReady) { Icon(imageVector = Icons.Default.Add, contentDescription = "Add Options", tint = Color(0xFF424242), modifier = Modifier.size(28.dp).rotate(addIconRotation)) } 
                                     }
                                 }
                             } 
