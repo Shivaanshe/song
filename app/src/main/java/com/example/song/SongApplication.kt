@@ -25,6 +25,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
+import android.content.Intent
+import android.os.Process
+import kotlin.system.exitProcess
 
 class SongApplication : Application(), ImageLoaderFactory {
 
@@ -96,9 +99,31 @@ class SongApplication : Application(), ImageLoaderFactory {
         }
     }
 
+    private fun setupGlobalCrashHandler() {
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                Log.e("SongApplication", "Fatal uncaught crash intercepted!", throwable)
+                val crashLog = throwable.stackTraceToString()
+                val intent = Intent(this, com.example.song.ui.screens.RecoveryActivity::class.java).apply {
+                    putExtra("EXTRA_CRASH_LOG", crashLog)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("SongApplication", "Failed to launch RecoveryActivity", e)
+                defaultHandler?.uncaughtException(thread, throwable)
+            } finally {
+                Process.killProcess(Process.myPid())
+                exitProcess(10)
+            }
+        }
+    }
+
     @androidx.media3.common.util.UnstableApi
     override fun onCreate() {
         super.onCreate()
+        setupGlobalCrashHandler()
         instance = this
 
         val database = AppDatabase.getDatabase(this)

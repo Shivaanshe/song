@@ -52,9 +52,9 @@ class OtaUpdateManager(
 
     companion object {
         private const val TAG = "OtaUpdateManager"
-        const val DEFAULT_OWNER = "shiva"
+        const val DEFAULT_OWNER = "Shivaanshe"
         const val DEFAULT_REPO = "song"
-        const val AUTO_CHECK_INTERVAL_MS = 8 * 60 * 60 * 1000L // 8 hours
+        const val AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L // 24 hours
     }
 
     private val retrofitService: GitHubReleaseService by lazy {
@@ -109,11 +109,11 @@ class OtaUpdateManager(
             Log.d(TAG, "Current version: $currentSemVer, Latest release: $latestSemVer")
 
             if (latestSemVer.isNewerThan(currentSemVer)) {
-                // Check if user chose "Remind Later" for this exact version (only if auto-check)
+                // Check if user chose "Remind Later" / deferred update (only if auto-check)
                 if (!force) {
-                    val remindLater = preferences.remindLaterVersion.first()
-                    if (remindLater == latestRelease.tagName) {
-                        Log.d(TAG, "User opted to remind later for version ${latestRelease.tagName}")
+                    val shouldPrompt = preferences.shouldPromptUpdate(latestRelease.tagName)
+                    if (!shouldPrompt) {
+                        Log.d(TAG, "User opted to remind later / deferred version ${latestRelease.tagName}")
                         return UpdateCheckResult.Throttled
                     }
                 }
@@ -265,7 +265,7 @@ class OtaUpdateManager(
             preferences.setLastInstalledVersionCode(currentVersionCode)
             preferences.setActiveDownloadId(-1L)
             preferences.setDownloadedApkPath(null)
-            preferences.setRemindLaterVersion(null)
+            preferences.clearRemindLater()
             cleanDownloadedApks()
 
             return PostUpdateResult(isPostUpdate = true, changelog = changelog)
@@ -291,8 +291,8 @@ class OtaUpdateManager(
         }
     }
 
-    suspend fun setRemindLater(versionTag: String) {
-        preferences.setRemindLaterVersion(versionTag)
+    suspend fun setRemindLater(versionTag: String, millisFromNow: Long = 86_400_000L) {
+        preferences.setRemindLater(millisFromNow, versionTag)
     }
 
     suspend fun clearPendingChangelog() {

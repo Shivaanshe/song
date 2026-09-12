@@ -18,6 +18,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -167,8 +170,46 @@ fun OtaUpdateAvailableDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (!isDownloading) {
-                        TextButton(onClick = { viewModel.remindLater() }) {
-                            Text("Remind Later")
+                        var dropdownExpanded by remember { mutableStateOf(false) }
+
+                        Box {
+                            TextButton(onClick = { dropdownExpanded = true }) {
+                                Text("Remind Later")
+                            }
+
+                            DropdownMenu(
+                                expanded = dropdownExpanded,
+                                onDismissRequest = { dropdownExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Tomorrow (24 hours)") },
+                                    onClick = {
+                                        dropdownExpanded = false
+                                        viewModel.remindLater(86_400_000L)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("In 1 Week") },
+                                    onClick = {
+                                        dropdownExpanded = false
+                                        viewModel.remindLater(604_800_000L)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("In 1 Month") },
+                                    onClick = {
+                                        dropdownExpanded = false
+                                        viewModel.remindLater(2_592_000_000L)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Skip This Release") },
+                                    onClick = {
+                                        dropdownExpanded = false
+                                        viewModel.remindLater(-1L)
+                                    }
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                     }

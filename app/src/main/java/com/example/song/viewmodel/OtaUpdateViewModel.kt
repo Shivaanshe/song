@@ -210,11 +210,11 @@ class OtaUpdateViewModel(application: Application) : AndroidViewModel(applicatio
         _showPermissionModal.value = false
     }
 
-    fun remindLater() {
+    fun remindLater(millisFromNow: Long = 86_400_000L) {
         val release = _activeRelease.value
         if (release != null) {
             viewModelScope.launch {
-                otaManager.setRemindLater(release.tagName)
+                otaManager.setRemindLater(release.tagName, millisFromNow)
                 _showUpdateModal.value = false
             }
         } else {

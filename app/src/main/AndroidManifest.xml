@@ -31,6 +31,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.screens.RecoveryActivity"
+            android:process=":recovery"
+            android:exported="false"
+            android:theme="@style/Theme.Pulse" />
+
         <service
             android:name=".service.MusicService"
             android:exported="true"
